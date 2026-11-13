@@ -13,6 +13,23 @@ struct WorkspaceRepo: Codable, Identifiable, Hashable {
     var repoName: String
     var worktreePath: String
     var baseBranch: String
+    /// True when the branch existed before Locker used it; Locker must never delete it.
+    var branchPreexisting = false
+
+    init(repoID: UUID, repoName: String, worktreePath: String, baseBranch: String, branchPreexisting: Bool = false) {
+        self.repoID = repoID; self.repoName = repoName; self.worktreePath = worktreePath
+        self.baseBranch = baseBranch; self.branchPreexisting = branchPreexisting
+    }
+
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        repoID = try c.decode(UUID.self, forKey: .repoID)
+        repoName = try c.decode(String.self, forKey: .repoName)
+        worktreePath = try c.decode(String.self, forKey: .worktreePath)
+        baseBranch = try c.decode(String.self, forKey: .baseBranch)
+        branchPreexisting = try c.decodeIfPresent(Bool.self, forKey: .branchPreexisting) ?? false
+    }
 }
 
 struct TerminalSpec: Codable, Identifiable, Hashable {

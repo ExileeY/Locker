@@ -11,6 +11,8 @@ struct DeleteWarning: Equatable {
     var ahead: Int
 }
 
+enum BranchState { case new, existing, remote }
+
 struct WorkspaceService {
     var git = GitClient()
     var lockerRoot: String
@@ -30,7 +32,9 @@ struct WorkspaceService {
     }
 
     /// Creates the workspace directory and one worktree per repo. Rolls back on any failure.
-    func create(name: String, branch: String, selections: [RepoSelection], existingNames: [String]) throws -> Workspace {
+    /// If the branch already exists in a repo it is checked out as is; otherwise it is created from the base.
+    func create(name: String, branch: String, selections: [RepoSelection], existingNames: [String],
+                progress: (String) -> Void = { _ in }) throws -> Workspace {
         guard !selections.isEmpty else { throw GitError(command: "", output: "Select at least one repository.", status: 1) }
         guard git.isValidBranchName(branch) else {
             throw GitError(command: "", output: "“\(branch)” is not a valid branch name.", status: 1)
@@ -39,32 +43,69 @@ struct WorkspaceService {
         if FileManager.default.fileExists(atPath: root) || existingNames.contains(name) {
             throw GitError(command: "", output: "A workspace folder named “\(Self.slug(name))” already exists.", status: 1)
         }
-        // Preflight: branch must not exist yet (git refuses one branch in two worktrees).
-        for s in selections where git.branchExists(branch, in: s.repo.path) {
-            throw GitError(command: "", output: "Branch “\(branch)” already exists in \(s.repo.name) (it may be checked out in another worktree). Choose a different branch name.", status: 1)
+        // Preflight: decide per repo whether to attach an existing branch or create a new one.
+        enum Plan { case new, existing, tracking }
+        var plans: [Plan] = []
+        for s in selections {
+            if git.branchExists(branch, in: s.repo.path) {
+                if let at = git.checkedOutBranches(repo: s.repo.path)[branch] {
+                    throw GitError(command: "", output: "\(s.repo.name): branch “\(branch)” is already checked out at \(at). Check out a different branch there or choose another branch name.", status: 1)
+                }
+                plans.append(.existing)
+            } else if git.remoteBranchExists(branch, in: s.repo.path) {
+                plans.append(.tracking)
+            } else {
+                if s.base.trimmingCharacters(in: .whitespaces).isEmpty {
+                    throw GitError(command: "", output: "\(s.repo.name): enter a base branch to create “\(branch)” from.", status: 1)
+                }
+                plans.append(.new)
+            }
         }
         let fm = FileManager.default
         try fm.createDirectory(atPath: root, withIntermediateDirectories: true)
-        var created: [(Repo, String)] = []
+        var created: [(repo: Repo, path: String, ownsBranch: Bool)] = []
         var links: [WorkspaceRepo] = []
         do {
-            for s in selections {
+            for (s, plan) in zip(selections, plans) {
                 let path = root + "/" + s.repo.name
-                try git.worktreeAdd(repo: s.repo.path, path: path, branch: branch, base: s.base)
-                created.append((s.repo, path))
-                links.append(WorkspaceRepo(repoID: s.repo.id, repoName: s.repo.name, worktreePath: path, baseBranch: s.base))
+                progress("Creating worktree for \(s.repo.name)…")
+                do {
+                    switch plan {
+                    case .new: try git.worktreeAdd(repo: s.repo.path, path: path, branch: branch, base: s.base)
+                    case .existing: try git.worktreeAddExisting(repo: s.repo.path, path: path, branch: branch)
+                    case .tracking: try git.worktreeAddTracking(repo: s.repo.path, path: path, branch: branch)
+                    }
+                } catch {
+                    throw GitError(command: "", output: "\(s.repo.name): \(error.localizedDescription)", status: 1)
+                }
+                let pre = plan == .existing
+                created.append((s.repo, path, !pre))
+                links.append(WorkspaceRepo(repoID: s.repo.id, repoName: s.repo.name, worktreePath: path,
+                                           baseBranch: s.base, branchPreexisting: pre))
             }
         } catch {
-            for (repo, path) in created {
-                try? git.worktreeRemove(repo: repo.path, path: path, force: true)
-                git.deleteBranch(repo: repo.path, branch: branch)
+            var leftovers: [String] = []
+            for c in created {
+                do { try git.worktreeRemove(repo: c.repo.path, path: c.path, force: true) }
+                catch { leftovers.append(c.path) }
+                if c.ownsBranch { git.deleteBranch(repo: c.repo.path, branch: branch) }
             }
-            try? fm.removeItem(atPath: root)
+            do { try fm.removeItem(atPath: root) } catch { leftovers.append(root) }
+            if !leftovers.isEmpty {
+                throw GitError(command: "", output: error.localizedDescription + "\n\nCleanup incomplete, remove manually: " + leftovers.joined(separator: ", "), status: 1)
+            }
             throw error
         }
         let terms = links.map { TerminalSpec(title: $0.repoName, cwd: $0.worktreePath, repoLabel: $0.repoName) }
         return Workspace(name: name, branch: branch, repos: links, terminals: terms,
                          activeTerminal: terms.first?.id, root: root)
+    }
+
+    /// Per-repo status of `branch` for UI badges.
+    func branchState(_ branch: String, in repo: Repo) -> BranchState {
+        if git.branchExists(branch, in: repo.path) { return .existing }
+        if git.remoteBranchExists(branch, in: repo.path) { return .remote }
+        return .new
     }
 
     func deleteWarnings(_ ws: Workspace) -> [DeleteWarning] {
@@ -83,7 +124,7 @@ struct WorkspaceService {
             let ahead = git.aheadCount(r.worktreePath, base: r.baseBranch)
             try? git.worktreeRemove(repo: repo.path, path: r.worktreePath, force: true)
             git.prune(repo: repo.path)
-            if ahead == 0 { git.deleteBranch(repo: repo.path, branch: ws.branch) }
+            if ahead == 0 && !r.branchPreexisting { git.deleteBranch(repo: repo.path, branch: ws.branch) }
         }
         try? FileManager.default.removeItem(atPath: ws.root)
     }

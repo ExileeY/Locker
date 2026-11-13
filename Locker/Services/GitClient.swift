@@ -74,6 +74,32 @@ struct GitClient {
         try run(["worktree", "add", "-b", branch, path, base], in: repo)
     }
 
+    /// Checks out an existing local branch into a new worktree at `path`.
+    func worktreeAddExisting(repo: String, path: String, branch: String) throws {
+        try run(["worktree", "add", path, branch], in: repo)
+    }
+
+    /// Creates a local branch tracking `origin/<branch>` in a new worktree.
+    func worktreeAddTracking(repo: String, path: String, branch: String) throws {
+        try run(["worktree", "add", "--track", "-b", branch, path, "origin/\(branch)"], in: repo)
+    }
+
+    func remoteBranchExists(_ branch: String, in dir: String) -> Bool {
+        (try? run(["rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(branch)"], in: dir)) != nil
+    }
+
+    /// Maps branch name -> worktree path for every worktree (including the main one) that has a branch checked out.
+    func checkedOutBranches(repo: String) -> [String: String] {
+        guard let out = try? run(["worktree", "list", "--porcelain"], in: repo) else { return [:] }
+        var result: [String: String] = [:]
+        var current = ""
+        for line in out.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("worktree ") { current = String(line.dropFirst(9)) }
+            else if line.hasPrefix("branch refs/heads/") { result[String(line.dropFirst(18))] = current }
+        }
+        return result
+    }
+
     func worktreeRemove(repo: String, path: String, force: Bool = false) throws {
         try run(["worktree", "remove"] + (force ? ["--force"] : []) + [path], in: repo)
     }

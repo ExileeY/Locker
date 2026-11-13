@@ -66,4 +66,71 @@ final class WorkspaceServiceTests: XCTestCase {
         try FileManager.default.removeItem(atPath: ws.repos[1].worktreePath)
         XCTAssertEqual(svc.missingWorktrees(ws, repos: [backend, frontend]).map(\.repoName), ["frontend"])
     }
+
+    // MARK: existing branches
+
+    func testCreateOnExistingBranchInAllRepos() throws {
+        for r in [backend!, frontend!] { try svc.git.run(["branch", "feat"], in: r.path) }
+        let ws = try svc.create(name: "T", branch: "feat", selections: sel(), existingNames: [])
+        XCTAssertTrue(ws.repos.allSatisfy(\.branchPreexisting))
+        for r in ws.repos { XCTAssertEqual(try svc.git.currentBranch(r.worktreePath), "feat") }
+    }
+
+    func testMixedExistingAndNew() throws {
+        try svc.git.run(["branch", "feat"], in: backend.path)
+        let ws = try svc.create(name: "T", branch: "feat", selections: sel(), existingNames: [])
+        XCTAssertEqual(ws.repos.map(\.branchPreexisting), [true, false])
+        XCTAssertTrue(svc.git.branchExists("feat", in: frontend.path))
+    }
+
+    func testBranchCheckedOutElsewhereGivesClearErrorWithoutSideEffects() throws {
+        try svc.git.run(["checkout", "-q", "-b", "wip"], in: backend.path)
+        do {
+            _ = try svc.create(name: "T", branch: "wip", selections: sel(), existingNames: [])
+            XCTFail("expected error")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("backend"))
+            XCTAssertTrue(error.localizedDescription.contains("already checked out"))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir + "/Locker/T"))
+        XCTAssertFalse(svc.git.branchExists("wip", in: frontend.path))
+    }
+
+    func testRollbackKeepsPreexistingBranchAndNamesFailingRepo() throws {
+        try svc.git.run(["branch", "feat"], in: backend.path)
+        let bad = [RepoSelection(repo: backend, base: "main"), RepoSelection(repo: frontend, base: "nope")]
+        do { _ = try svc.create(name: "T", branch: "feat", selections: bad, existingNames: []); XCTFail() }
+        catch { XCTAssertTrue(error.localizedDescription.hasPrefix("frontend:")) }
+        XCTAssertTrue(svc.git.branchExists("feat", in: backend.path))
+        XCTAssertFalse(svc.git.branchExists("feat", in: frontend.path))
+        XCTAssertEqual(try svc.git.worktreeList(repo: backend.path).count, 1)
+    }
+
+    func testDeleteKeepsPreexistingBranch() throws {
+        try svc.git.run(["branch", "feat"], in: backend.path)
+        let ws = try svc.create(name: "T", branch: "feat", selections: sel(), existingNames: [])
+        svc.delete(ws, repos: [backend, frontend])
+        XCTAssertTrue(svc.git.branchExists("feat", in: backend.path))
+        XCTAssertFalse(svc.git.branchExists("feat", in: frontend.path))
+    }
+
+    func testEmptyBaseForNewBranchFailsEarly() {
+        let s = [RepoSelection(repo: backend, base: " ")]
+        XCTAssertThrowsError(try svc.create(name: "T", branch: "new-b", selections: s, existingNames: [])) {
+            XCTAssertTrue($0.localizedDescription.contains("base branch"))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir + "/Locker/T"))
+    }
+
+    func testProgressReportsEachRepo() throws {
+        var msgs: [String] = []
+        _ = try svc.create(name: "T", branch: "p", selections: sel(), existingNames: []) { msgs.append($0) }
+        XCTAssertEqual(msgs.count, 2)
+    }
+
+    func testOldStateWithoutBranchPreexistingDecodes() throws {
+        let json = #"{"id":"\#(UUID().uuidString)","repoID":"\#(UUID().uuidString)","repoName":"a","worktreePath":"/x","baseBranch":"main"}"#
+        let r = try JSONDecoder().decode(WorkspaceRepo.self, from: Data(json.utf8))
+        XCTAssertFalse(r.branchPreexisting)
+    }
 }
