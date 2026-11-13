@@ -6,7 +6,6 @@ struct NewWorkspaceSheet: View {
     @Environment(\.dismiss) var dismiss
     @State private var name = ""
     @State private var branch = ""
-    @State private var branchEdited = false
     @State private var chosen: Set<UUID> = []
     @State private var bases: [UUID: String] = [:]
     @State private var busy = false
@@ -18,8 +17,8 @@ struct NewWorkspaceSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New workspace").font(.system(size: 16, weight: .bold))
             field("Name", text: $name, prompt: "Apple Pay")
-                .onChange(of: name) { _, v in error = nil; if !branchEdited { branch = WorkspaceService.slug(v).lowercased() } }
-            field("Branch (same in every repo)", text: Binding(get: { branch }, set: { branch = $0; branchEdited = true }), prompt: "feature/apple-pay", mono: true)
+                .onChange(of: name) { _, _ in error = nil }
+            field("Branch (optional, same in every repo)", text: $branch, prompt: "Leave empty to start detached at the default branch", mono: true)
                 .onChange(of: branch) { _, _ in error = nil }
                 .task(id: BranchKey(branch: branch, repos: model.state.repos.map(\.id))) { await refreshBranchStates() }
             HStack {
@@ -43,6 +42,10 @@ struct NewWorkspaceSheet: View {
                             Spacer()
                             if model.repoMissing(r) {
                                 Text("missing").font(.system(size: 11)).foregroundStyle(Theme.amber)
+                            } else if branch.isEmpty {
+                                Text("detached at").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                                TextField(r.defaultBranch, text: Binding(get: { bases[r.id] ?? r.defaultBranch }, set: { bases[r.id] = $0; error = nil }))
+                                    .font(Theme.mono(11.5)).frame(width: 110).textFieldStyle(.roundedBorder)
                             } else if branchStates[r.id] == .existing || branchStates[r.id] == .remote {
                                 Text(branchStates[r.id] == .existing ? "existing branch" : "from origin")
                                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.green)
@@ -79,10 +82,9 @@ struct NewWorkspaceSheet: View {
 
     var disabledReason: String? {
         if name.trimmingCharacters(in: .whitespaces).isEmpty { return "Enter a workspace name." }
-        if branch.isEmpty { return "Enter a branch name." }
         if chosen.isEmpty { return "Select at least one repository." }
         for r in model.state.repos where chosen.contains(r.id) {
-            if branchStates[r.id] == .new, (bases[r.id] ?? r.defaultBranch).trimmingCharacters(in: .whitespaces).isEmpty {
+            if branch.isEmpty || branchStates[r.id] == .new, (bases[r.id] ?? r.defaultBranch).trimmingCharacters(in: .whitespaces).isEmpty {
                 return "Enter a base branch for \(r.name)."
             }
         }

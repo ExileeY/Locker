@@ -13,6 +13,8 @@ struct GitError: Error, LocalizedError {
 struct GitStatus: Equatable {
     var branch: String
     var dirty: Bool
+    /// `rev-parse --abbrev-ref HEAD` prints "HEAD" when no branch is checked out.
+    var detached: Bool { branch == "HEAD" }
 }
 
 struct GitClient {
@@ -84,6 +86,15 @@ struct GitClient {
         try run(["worktree", "add", "--track", "-b", branch, path, "origin/\(branch)"], in: repo)
     }
 
+    /// Checks out `base`'s commit with no branch, so it never conflicts with another worktree.
+    func worktreeAddDetached(repo: String, path: String, base: String) throws {
+        try run(["worktree", "add", "--detach", path, base], in: repo)
+    }
+
+    func refExists(_ ref: String, in dir: String) -> Bool {
+        (try? run(["rev-parse", "--verify", "--quiet", "\(ref)^{commit}"], in: dir)) != nil
+    }
+
     func remoteBranchExists(_ branch: String, in dir: String) -> Bool {
         (try? run(["rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(branch)"], in: dir)) != nil
     }
@@ -123,10 +134,40 @@ struct GitClient {
     }
 
     /// Commits on HEAD that are not on `base` (work that exists only on this branch).
-    func aheadCount(_ dir: String, base: String) -> Int {
-        guard let out = try? run(["rev-list", "--count", "\(base)..HEAD"], in: dir) else { return 0 }
+    func aheadCount(_ dir: String, base: String, head: String = "HEAD") -> Int {
+        guard let out = try? run(["rev-list", "--count", "\(base)..\(head)"], in: dir) else { return 0 }
         return Int(out.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
     }
+
+    /// Commits reachable from HEAD but from no local or remote branch (lost if HEAD moves away).
+    func unbranchedCommits(_ dir: String) -> Int {
+        guard let out = try? run(["rev-list", "--count", "HEAD", "--not", "--branches", "--remotes"], in: dir) else { return 0 }
+        return Int(out.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+    }
+
+    struct BranchList: Equatable { var local: [String]; var remoteOnly: [String] }
+
+    func listBranches(_ dir: String) -> BranchList {
+        let fmt = ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin"]
+        guard let out = try? run(fmt, in: dir) else { return BranchList(local: [], remoteOnly: []) }
+        var local: [String] = [], remote: [String] = []
+        for l in out.split(separator: "\n") {
+            if l.hasPrefix("refs/heads/") { local.append(String(l.dropFirst(11))) }
+            else if l.hasPrefix("refs/remotes/origin/") {
+                let n = String(l.dropFirst(20))
+                if n != "HEAD" { remote.append(n) }
+            }
+        }
+        return BranchList(local: local.sorted(), remoteOnly: remote.filter { !local.contains($0) }.sorted())
+    }
+
+    func switchBranch(_ branch: String, in dir: String) throws { try run(["switch", branch], in: dir) }
+
+    func switchTracking(_ branch: String, in dir: String) throws {
+        try run(["switch", "--track", "origin/\(branch)"], in: dir)
+    }
+
+    func switchDetach(_ ref: String, in dir: String) throws { try run(["switch", "--detach", ref], in: dir) }
 
     func switchCreate(_ branch: String, in dir: String) throws {
         try run(["switch", "-c", branch], in: dir)
@@ -138,5 +179,10 @@ extension GitClient {
     func worktreeAttach(repo: String, path: String, branch: String) throws {
         prune(repo: repo)
         try run(["worktree", "add", path, branch], in: repo)
+    }
+
+    func worktreeAttachDetached(repo: String, path: String, base: String) throws {
+        prune(repo: repo)
+        try worktreeAddDetached(repo: repo, path: path, base: base)
     }
 }
