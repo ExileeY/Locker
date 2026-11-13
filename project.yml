@@ -1,0 +1,43 @@
+name: Locker
+options:
+  bundleIdPrefix: dev.locker
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm.git
+    from: 1.99.3
+targets:
+  Locker:
+    type: application
+    platform: macOS
+    sources: [Locker]
+    dependencies:
+      - package: SwiftTerm
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.locker.Locker
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Locker
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+  LockerTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [LockerTests, Locker/Models, Locker/Services]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: dev.locker.LockerTests
+        CODE_SIGN_IDENTITY: "-"
+schemes:
+  Locker:
+    build: {targets: {Locker: all}}
+    test: {targets: [LockerTests]}
