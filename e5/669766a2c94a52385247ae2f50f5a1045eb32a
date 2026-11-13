@@ -1,0 +1,51 @@
+.gitignore
+  s_3f3f23f725eb9c::t_b1410c46956a45 1-4
+Locker/App/AppModel.swift
+  s_3f3f23f725eb9c::t_dbfa2f04df14f2 1-179
+Locker/LockerApp.swift
+  s_3f3f23f725eb9c::t_ec24ac4cfa28c6 1-29
+Locker/Models/Models.swift
+  s_3f3f23f725eb9c::t_94c3b90ef9d7df 1-39
+Locker/Services/GitClient.swift
+  s_3f3f23f725eb9c::t_01ee3108d37d5b 1-116
+Locker/Services/Store.swift
+  s_3f3f23f725eb9c::t_47506f40b30c2b 1-28
+Locker/Services/WorkspaceService.swift
+  s_3f3f23f725eb9c::t_1c71c36eba621b 1-124
+Locker/Terminal/TerminalHost.swift
+  s_3f3f23f725eb9c::t_2070d2acde254a 1-69
+Locker/Views/ContentView.swift
+  s_3f3f23f725eb9c::t_2baed1d1c63bb6 1-142
+Locker/Views/Sheets.swift
+  s_3f3f23f725eb9c::t_2aadcea0e9925c 1-122
+Locker/Views/Theme.swift
+  s_3f3f23f725eb9c::t_88f07bfee94eff 1-48
+Locker/Views/WorkspaceDetail.swift
+  s_3f3f23f725eb9c::t_92c0a934df87f5 1-173
+LockerTests/GitClientTests.swift
+  s_3f3f23f725eb9c::t_4369d8b5fc64d3 1-45
+LockerTests/TestSupport.swift
+  s_3f3f23f725eb9c::t_ac02fce926f37a 1-23
+LockerTests/WorkspaceServiceTests.swift
+  s_3f3f23f725eb9c::t_4377ee2f024f6c 1-69
+README.md
+  s_3f3f23f725eb9c::t_24bb7eac64acdb 1-10
+project.yml
+  s_3f3f23f725eb9c::t_42777e4755102c 1-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e5669766a2c94a52385247ae2f50f5a1045eb32a",
+  "prompts": {},
+  "sessions": {
+    "s_3f3f23f725eb9c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a3b557cb-49dc-4890-9867-1a692c97e00c",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
