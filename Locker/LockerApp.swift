@@ -17,6 +17,7 @@ struct LockerApp: App {
                 Button("New Terminal") { model.addTerminal() }.keyboardShortcut("t")
                     .disabled(model.selected == nil)
                 Button("Repositories…") { model.showRepos = true }.keyboardShortcut(",", modifiers: [.command, .shift])
+                Button("Projects…") { model.showProjects = true }.keyboardShortcut("p", modifiers: [.command, .shift])
             }
             CommandMenu("Workspace") {
                 ForEach(0..<9, id: \.self) { i in

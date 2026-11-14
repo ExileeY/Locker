@@ -18,6 +18,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $model.showNewWorkspace) { NewWorkspaceSheet() }
         .sheet(isPresented: $model.showRepos) { RepoSettings() }
+        .sheet(isPresented: $model.showProjects) { ProjectSettings() }
         .alert("Locker", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") { model.errorMessage = nil }
         } message: { Text(model.errorMessage ?? "") }
@@ -87,8 +88,12 @@ struct SidebarView: View {
                 }
             }
             Spacer(minLength: 0)
-            Button("Repositories…") { model.showRepos = true }.buttonStyle(.plain)
-                .font(.system(size: 12)).foregroundStyle(Theme.chipFG).padding(8)
+            HStack(spacing: 4) {
+                Button("Repositories…") { model.showRepos = true }.buttonStyle(.plain)
+                    .font(.system(size: 12)).foregroundStyle(Theme.chipFG).padding(8)
+                Button("Projects…") { model.showProjects = true }.buttonStyle(.plain)
+                    .font(.system(size: 12)).foregroundStyle(Theme.chipFG).padding(8)
+            }
         }
         .padding(.horizontal, 10).padding(.top, 14)
         .background(Theme.sidebar)
