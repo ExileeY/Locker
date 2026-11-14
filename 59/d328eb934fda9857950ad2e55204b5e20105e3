@@ -1,0 +1,25 @@
+Locker/Models/Models.swift
+  s_78a2a2d54d22ac::t_f426a4bc5ea0f2 46-73,86-87,92-97,115
+Locker/Views/Sheets.swift
+  s_78a2a2d54d22ac::t_5f8bf93c9f7685 83-97,102-107,109-110,114,121-146,172,174-175,177,189
+LockerTests/WorkspaceServiceTests.swift
+  s_78a2a2d54d22ac::t_c9bc5fb0cbcde6 29,31
+README.md
+  s_78a2a2d54d22ac::t_650919d679e8aa 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "59d328eb934fda9857950ad2e55204b5e20105e3",
+  "prompts": {},
+  "sessions": {
+    "s_78a2a2d54d22ac": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9ffc6be9-40ce-4f86-bb0e-ec831224125c",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
