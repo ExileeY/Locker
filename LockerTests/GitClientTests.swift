@@ -42,4 +42,15 @@ final class GitClientTests: XCTestCase {
         XCTAssertFalse(git.isValidBranchName("bad name"))
         XCTAssertFalse(git.isValidBranchName(""))
     }
+
+    func testCheckedOutBranchesAndAddExisting() throws {
+        let dir = TestSupport.tempDir()
+        let r = TestSupport.makeRepo(named: "r", in: dir)
+        let g = GitClient()
+        try g.run(["branch", "feat"], in: r.path)
+        XCTAssertEqual(g.checkedOutBranches(repo: r.path)["main"], r.path)
+        XCTAssertNil(g.checkedOutBranches(repo: r.path)["feat"])
+        try g.worktreeAddExisting(repo: r.path, path: dir + "/wt", branch: "feat")
+        XCTAssertEqual(g.checkedOutBranches(repo: r.path)["feat"], dir + "/wt")
+    }
 }

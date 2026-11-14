@@ -4,20 +4,9 @@ import AppKit
 struct WorkspaceDetail: View {
     @EnvironmentObject var model: AppModel
     let ws: Workspace
-    @State private var formOpen = false
-    @State private var draft = ""
-
     var body: some View {
         VStack(spacing: 0) {
             header
-            if formOpen {
-                (Text("Branches from ") + Text(ws.branch).font(Theme.mono(12)) +
-                 Text(" in this workspace only. Your other workspaces stay on their branches."))
-                    .font(.system(size: 12)).foregroundStyle(Color(hex: 0x2A3A80))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20).padding(.vertical, 8)
-                    .background(Color(hex: 0xF4F6FE))
-            }
             if !model.missing.isEmpty {
                 HStack {
                     Text("Some worktrees were deleted outside Locker: " + ws.repos.filter { model.missing.contains($0.id) }.map(\.repoName).joined(separator: ", "))
@@ -34,47 +23,148 @@ struct WorkspaceDetail: View {
     var header: some View {
         HStack(spacing: 10) {
             Text(ws.name).font(.system(size: 16, weight: .bold)).lineLimit(1)
-            ForEach(ws.repos) { r in BranchChip(repo: r, status: model.statuses[r.id], missing: model.missing.contains(r.id)) }
+            ForEach(ws.repos) { r in BranchChip(ws: ws, repo: r, status: model.statuses[r.id], missing: model.missing.contains(r.id)) }
             Spacer()
-            if formOpen {
-                Text("New branch").font(.system(size: 13, weight: .medium))
-                TextField("feature/my-change", text: $draft)
-                    .textFieldStyle(.plain).font(Theme.mono(12))
-                    .padding(.horizontal, 10).frame(width: 240, height: 32)
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(hex: 0xB9B9B3)))
-                    .onSubmit(create)
-                Button("Cancel") { formOpen = false; draft = "" }.buttonStyle(OutlineButton())
-                Button("Create", action: create).buttonStyle(PrimaryButton())
-            } else {
-                Button { formOpen = true } label: { Label("New branch", systemImage: "arrow.triangle.branch") }
-                    .buttonStyle(OutlineButton())
-            }
         }
         .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 60)
         .overlay(alignment: .bottom) { Rectangle().fill(Color(hex: 0xECECE8)).frame(height: 1) }
     }
-
-    func create() {
-        let name = draft.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: " ", with: "-")
-        guard !name.isEmpty else { return }
-        Task { if await model.createBranch(name) { formOpen = false; draft = "" } }
-    }
 }
 
+/// Per-repo branch chip. Clicking opens a picker to switch this repo's worktree only.
 struct BranchChip: View {
+    @EnvironmentObject var model: AppModel
+    let ws: Workspace
     let repo: WorkspaceRepo
     let status: GitStatus?
     let missing: Bool
+    @State private var open = false
+
+    private var detached: Bool { status?.detached == true }
+
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "arrow.triangle.branch").font(.system(size: 10))
-            Text(repo.repoName).fontWeight(.semibold)
-            Text(missing ? "missing" : (status?.branch ?? "…"))
-            if status?.dirty == true { Circle().fill(Theme.amber).frame(width: 6, height: 6).help("Uncommitted changes") }
+        Button { if !missing { open = true } } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch").font(.system(size: 10))
+                Text(repo.repoName).fontWeight(.semibold)
+                Text(missing ? "missing" : label)
+                if status?.dirty == true { Circle().fill(Theme.amber).frame(width: 6, height: 6).help("Uncommitted changes") }
+                if !missing { Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)) }
+            }
+            .font(Theme.mono(11.5)).padding(.horizontal, 8).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 6).fill(missing || detached ? Color(hex: 0xFFF4E5) : Theme.chipBG))
+            .foregroundStyle(missing || detached ? Theme.amber : Theme.chipFG)
+            .contentShape(Rectangle())
         }
-        .font(Theme.mono(11.5)).padding(.horizontal, 8).padding(.vertical, 3)
-        .background(RoundedRectangle(cornerRadius: 6).fill(missing ? Color(hex: 0xFFF4E5) : Theme.chipBG))
-        .foregroundStyle(missing ? Theme.amber : Theme.chipFG)
+        .buttonStyle(.plain)
+        .help(detached ? "Detached HEAD: commits here belong to no branch until you create one." : "Switch branch in this workspace")
+        .popover(isPresented: $open, arrowEdge: .bottom) { BranchPicker(ws: ws, repo: repo, detached: detached) { open = false } }
+    }
+
+    private var label: String {
+        guard let s = status else { return "…" }
+        return s.detached ? "detached @ \(repo.baseBranch)" : s.branch
+    }
+}
+
+struct BranchPicker: View {
+    @EnvironmentObject var model: AppModel
+    let ws: Workspace
+    let repo: WorkspaceRepo
+    let detached: Bool
+    let close: () -> Void
+    @State private var choices: [WorkspaceService.BranchChoice] = []
+    @State private var loaded = false
+    @State private var query = ""
+    @State private var newName = ""
+    @State private var busy = false
+    /// An action waiting for the user to accept losing unbranched commits.
+    @State private var pending: (title: String, run: () async -> Bool)?
+    @State private var lost = 0
+
+    private var filtered: [WorkspaceService.BranchChoice] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        return q.isEmpty ? choices : choices.filter { $0.name.lowercased().contains(q) }
+    }
+
+    func owner(of path: String) -> String {
+        if let w = model.state.workspaces.first(where: { path.hasPrefix($0.root + "/") }) { return "workspace “\(w.name)”" }
+        return "the source repo"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Switch \(repo.repoName) to…").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+            Text("Only this workspace changes. Your other workspaces stay as they are.")
+                .font(.system(size: 11)).foregroundStyle(Theme.muted)
+            if let p = pending {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("\(lost) commit\(lost == 1 ? "" : "s") on this detached HEAD belong to no branch and will be left behind (recoverable only via git reflog).")
+                        .font(.system(size: 12)).foregroundStyle(Theme.amber)
+                    HStack {
+                        Button("Cancel") { pending = nil }.buttonStyle(OutlineButton())
+                        Button(p.title) { run(p.run, confirmed: true) }.buttonStyle(PrimaryButton())
+                    }
+                }
+                .padding(8).background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: 0xFFF4E5)))
+            }
+            if !detached {
+                row("Detach at \(repo.baseBranch)", note: "no branch") { await model.detach(ws, repo) }
+            }
+            TextField("Search branches", text: $query).textFieldStyle(.roundedBorder).font(Theme.mono(12))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    if !loaded { ProgressView().controlSize(.small) }
+                    ForEach(filtered) { c in
+                        row(c.name, note: c.occupiedAt.map { "in use by \(owner(of: $0))" } ?? (c.remoteOnly ? "from origin" : nil),
+                            disabled: c.occupiedAt != nil || c.name == status) { await model.switchBranch(ws, repo, to: c) }
+                    }
+                }
+            }.frame(height: 160)
+            Divider()
+            Text("New branch from here").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+            HStack {
+                TextField("feature/my-change", text: $newName).textFieldStyle(.roundedBorder).font(Theme.mono(12)).onSubmit(create)
+                Button("Create", action: create).buttonStyle(PrimaryButton()).disabled(cleanName.isEmpty || busy)
+            }
+        }
+        .padding(14).frame(width: 340)
+        .task { choices = await model.branchChoices(repo); loaded = true }
+    }
+
+    private var status: String { model.statuses[repo.id]?.branch ?? "" }
+    private var cleanName: String { newName.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: " ", with: "-") }
+
+    private func create() {
+        let n = cleanName
+        guard !n.isEmpty else { return }
+        run({ await model.createBranch(n, in: ws, repo) }, confirmed: true)
+    }
+
+    private func row(_ title: String, note: String?, disabled: Bool = false, action: @escaping () async -> Bool) -> some View {
+        Button { run(action, confirmed: false, title: "Switch anyway") } label: {
+            HStack {
+                Text(title).font(Theme.mono(12)).lineLimit(1)
+                Spacer()
+                if let note { Text(note).font(.system(size: 10.5)).foregroundStyle(Theme.muted) }
+            }
+            .padding(.horizontal, 6).padding(.vertical, 4).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(disabled || busy).opacity(disabled ? 0.5 : 1)
+    }
+
+    /// Switching away from a detached HEAD with unbranched commits asks first; creating a branch never loses them.
+    private func run(_ action: @escaping () async -> Bool, confirmed: Bool, title: String = "Switch anyway") {
+        Task {
+            if !confirmed && detached {
+                let n = await model.unbranchedCommits(repo)
+                if n > 0 { lost = n; pending = (title, action); return }
+            }
+            busy = true
+            let ok = await action()
+            busy = false
+            if ok { close() }
+        }
     }
 }
 
