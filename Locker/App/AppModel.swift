@@ -36,7 +36,7 @@ final class AppModel: ObservableObject {
 
     var selected: Workspace? { state.workspaces.first { $0.id == selectedID } }
     var totalTerminals: Int { state.workspaces.reduce(0) { $0 + $1.terminals.count } }
-    var distinctBranches: Int { Set(state.workspaces.map(\.branch)).count }
+    var distinctBranches: Int { Set(state.workspaces.flatMap { $0.repos.compactMap(\.lastBranch) }).count }
 
     func save() { store.save(state) }
 
@@ -86,18 +86,27 @@ final class AppModel: ObservableObject {
 
     // MARK: Repos
 
-    func addRepo(url: URL) {
+    enum AddRepoResult { case added(Repo), existing(Repo), failed(String) }
+
+    /// Registers a repo. Failures are returned (so a sheet can show them inline) and not shown as the global alert.
+    func registerRepo(url: URL) -> AddRepoResult {
         let path = url.path
         let git = service.git
-        guard git.isRepo(path) else { errorMessage = "“\(url.lastPathComponent)” is not a git repository."; return }
+        guard git.isRepo(path) else { return .failed("“\(url.lastPathComponent)” is not a git repository.") }
         let top = (try? git.run(["rev-parse", "--show-toplevel"], in: path))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? path
-        guard !state.repos.contains(where: { $0.path == top }) else { return }
+        if let r = state.repos.first(where: { $0.path == top }) { return .existing(r) }
         let name = URL(fileURLWithPath: top).lastPathComponent
         guard !state.repos.contains(where: { $0.name == name }) else {
-            errorMessage = "A repository named “\(name)” is already registered."; return
+            return .failed("A repository named “\(name)” is already registered.")
         }
-        state.repos.append(Repo(name: name, path: top, defaultBranch: git.detectDefaultBranch(top)))
+        let repo = Repo(name: name, path: top, defaultBranch: git.detectDefaultBranch(top))
+        state.repos.append(repo)
         save()
+        return .added(repo)
+    }
+
+    func addRepo(url: URL) {
+        if case .failed(let m) = registerRepo(url: url) { errorMessage = m }
     }
 
     func removeRepo(_ r: Repo) {
@@ -140,20 +149,21 @@ final class AppModel: ObservableObject {
 
     // MARK: Workspaces
 
-    func createWorkspace(name: String, branch: String, selections: [RepoSelection]) async -> Bool {
+    /// Returns nil on success, or the error text to show in the sheet.
+    func createWorkspace(name: String, branch: String, selections: [RepoSelection],
+                         progress: @escaping @Sendable (String) -> Void = { _ in }) async -> String? {
         let svc = service, names = state.workspaces.map(\.name)
         let result: Result<Workspace, Error> = await Task.detached {
-            Result { try svc.create(name: name, branch: branch, selections: selections, existingNames: names) }
+            Result { try svc.create(name: name, branch: branch, selections: selections, existingNames: names, progress: progress) }
         }.value
         switch result {
         case .success(let ws):
             state.workspaces.append(ws)
             save()
             select(ws.id)
-            return true
+            return nil
         case .failure(let e):
-            errorMessage = e.localizedDescription
-            return false
+            return e.localizedDescription
         }
     }
 
@@ -167,23 +177,60 @@ final class AppModel: ObservableObject {
         if selectedID == ws.id { select(state.workspaces.first?.id) }
     }
 
-    func createBranch(_ name: String) async -> Bool {
-        guard let ws = selected else { return false }
+    private func updateRepo(_ ws: UUID, _ repo: UUID, _ f: (inout WorkspaceRepo) -> Void) {
+        update(ws) { w in
+            if let i = w.repos.firstIndex(where: { $0.id == repo }) { f(&w.repos[i]) }
+        }
+    }
+
+    func branchChoices(_ r: WorkspaceRepo) async -> [WorkspaceService.BranchChoice] {
+        let svc = service
+        return await Task.detached { svc.branchChoices(for: r) }.value
+    }
+
+    func unbranchedCommits(_ r: WorkspaceRepo) async -> Int {
+        let svc = service
+        return await Task.detached { svc.unbranchedCommits(r) }.value
+    }
+
+    /// Runs a per-repo git change off the main actor; reports the error and returns false on failure.
+    private func perform(_ ws: Workspace, _ r: WorkspaceRepo, _ work: @escaping @Sendable (WorkspaceService) throws -> Void) async -> Bool {
         let svc = service
         let err: Error? = await Task.detached {
-            do { try svc.createBranch(name, in: ws); return nil } catch { return error }
+            do { try work(svc); return nil } catch { return error }
         }.value
         if let err { errorMessage = err.localizedDescription; return false }
-        update(ws.id) { $0.branch = name }
         refresh()
+        return true
+    }
+
+    func switchBranch(_ ws: Workspace, _ r: WorkspaceRepo, to choice: WorkspaceService.BranchChoice) async -> Bool {
+        await perform(ws, r) { try $0.switchBranch(choice, in: r) }
+    }
+
+    func detach(_ ws: Workspace, _ r: WorkspaceRepo) async -> Bool {
+        let base = r.baseBranch
+        return await perform(ws, r) { try $0.detach(r, at: base) }
+    }
+
+    func createBranch(_ name: String, in ws: Workspace, _ r: WorkspaceRepo) async -> Bool {
+        guard await perform(ws, r, { try $0.createBranch(name, in: r) }) else { return false }
+        updateRepo(ws.id, r.id) { $0.ownedBranches.append(name); $0.lastBranch = name }
         return true
     }
 
     func repair(_ ws: Workspace) {
         for r in service.missingWorktrees(ws, repos: state.repos) {
             guard let repo = state.repos.first(where: { $0.id == r.repoID }) else { continue }
-            do { try service.git.worktreeAttach(repo: repo.path, path: r.worktreePath, branch: ws.branch) }
-            catch { errorMessage = error.localizedDescription }
+            do {
+                let g = service.git
+                if let b = r.lastBranch, g.branchExists(b, in: repo.path), g.checkedOutBranches(repo: repo.path)[b] == nil {
+                    try g.worktreeAttach(repo: repo.path, path: r.worktreePath, branch: b)
+                } else {
+                    try g.worktreeAttachDetached(repo: repo.path, path: r.worktreePath, base: r.baseBranch)
+                    updateRepo(ws.id, r.id) { $0.lastBranch = nil }
+                }
+            } catch { errorMessage = error.localizedDescription }
         }
         select(ws.id)
     }
@@ -200,6 +247,11 @@ final class AppModel: ObservableObject {
                 if let s = try? svc.git.status(r.worktreePath) { out[r.id] = s }
             }
             await MainActor.run {
+                for r in ws.repos {
+                    guard let st = out[r.id] else { continue }
+                    let b: String? = st.detached ? nil : st.branch
+                    if r.lastBranch != b { self.updateRepo(ws.id, r.id) { $0.lastBranch = b } }
+                }
                 for (k, v) in out where self.statuses[k] != v { self.statuses[k] = v }
                 if self.missing != miss { self.missing = miss }
             }

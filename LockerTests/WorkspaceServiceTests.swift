@@ -26,8 +26,9 @@ final class WorkspaceServiceTests: XCTestCase {
     func testIsolationBetweenWorkspaces() throws {
         let a = try svc.create(name: "Task 1", branch: "task-1", selections: sel(), existingNames: [])
         let b = try svc.create(name: "Task 2", branch: "task-2", selections: sel(), existingNames: ["Task 1"])
-        try svc.createBranch("extra", in: b)
+        try svc.createBranch("extra", in: b.repos[0])
         XCTAssertEqual(try svc.git.currentBranch(b.repos[0].worktreePath), "extra")
+        XCTAssertEqual(try svc.git.currentBranch(b.repos[1].worktreePath), "task-2")
         XCTAssertEqual(try svc.git.currentBranch(a.repos[0].worktreePath), "task-1")
         XCTAssertEqual(try svc.git.currentBranch(backend.path), "main")
     }
@@ -66,8 +67,6 @@ final class WorkspaceServiceTests: XCTestCase {
         try FileManager.default.removeItem(atPath: ws.repos[1].worktreePath)
         XCTAssertEqual(svc.missingWorktrees(ws, repos: [backend, frontend]).map(\.repoName), ["frontend"])
     }
-<<<<<<< Updated upstream
-=======
 
     // MARK: existing branches
 
@@ -243,5 +242,4 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertEqual(r[0].ownedBranches, ["feat"]); XCTAssertEqual(r[1].ownedBranches, [])
         XCTAssertEqual(r.map(\.lastBranch), ["feat", "feat"])
     }
->>>>>>> Stashed changes
 }

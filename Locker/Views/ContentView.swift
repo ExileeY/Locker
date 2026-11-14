@@ -108,7 +108,7 @@ struct SidebarView: View {
 
     var deleteTitle: String { "Delete “\(pendingDelete?.name ?? "")”?" }
     var deleteMessage: String {
-        if warnings.isEmpty { return "Its worktrees and branch are removed. Your source repositories are untouched." }
+        if warnings.isEmpty { return "Its worktrees and any branches Locker created are removed. Your source repositories are untouched." }
         let lines = warnings.map { w -> String in
             var p: [String] = []
             if w.dirty { p.append("uncommitted changes") }
@@ -133,7 +133,7 @@ struct SidebarRow: View {
             }
             HStack(spacing: 5) {
                 Image(systemName: "arrow.triangle.branch").font(.system(size: 10))
-                Text("\(ws.branch) · \(ws.repos.count) \(ws.repos.count == 1 ? "repo" : "repos")")
+                Text("\(ws.branchSummary) · \(ws.repos.count) \(ws.repos.count == 1 ? "repo" : "repos")")
                     .font(Theme.mono(11)).lineLimit(1)
             }
             .foregroundStyle(Color(hex: 0x55554F)).padding(.leading, 16)
