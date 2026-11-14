@@ -1,0 +1,28 @@
+Locker/App/AppModel.swift
+  h_6182a0f98cbdb9 12,108,114-140
+Locker/LockerApp.swift
+  h_6182a0f98cbdb9 20
+Locker/Models/Models.swift
+  h_6182a0f98cbdb9 10-39,66,68-71,73,75-103
+Locker/Views/ContentView.swift
+  h_6182a0f98cbdb9 21,91-96
+Locker/Views/Sheets.swift
+  h_6182a0f98cbdb9 13-37,43,46-62,64-68,70-73,78-79,83,122,125-132,185-295
+LockerTests/ProjectTests.swift
+  h_6182a0f98cbdb9 1-65
+LockerTests/WorkspaceServiceTests.swift
+  h_6182a0f98cbdb9 69-246
+README.md
+  h_6182a0f98cbdb9 11-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a796ba0ce5a568603af2b1287cef3b3d2df64eef",
+  "prompts": {},
+  "humans": {
+    "h_6182a0f98cbdb9": {
+      "author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
