@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var showNewWorkspace = false
     @Published var showRepos = false
+    @Published var showProjects = false
     @Published var gitMissing = false
     @Published var sessionsVersion = 0
 
@@ -113,10 +114,38 @@ final class AppModel: ObservableObject {
             errorMessage = "“\(r.name)” is used by a workspace. Delete that workspace first."; return
         }
         state.repos.removeAll { $0.id == r.id }
+        state.removeRepoFromProjects(r.id)
         save()
     }
 
     func repoMissing(_ r: Repo) -> Bool { !FileManager.default.fileExists(atPath: r.path) }
+
+    // MARK: Projects
+
+    /// Returns nil on success, or the error text to show in the editor. `id` nil creates a project, otherwise edits it.
+    func saveProject(id: UUID?, name: String, repoIDs: [UUID]) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return "Enter a project name." }
+        if state.projects.contains(where: { $0.id != id && $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+            return "A project named “\(trimmed)” already exists."
+        }
+        let valid = Set(state.repos.map(\.id))
+        let ids = repoIDs.filter(valid.contains)
+        if let id, let i = state.projects.firstIndex(where: { $0.id == id }) {
+            state.projects[i].name = trimmed
+            state.projects[i].repoIDs = ids
+        } else {
+            state.projects.append(Project(name: trimmed, repoIDs: ids))
+        }
+        save()
+        return nil
+    }
+
+    /// Removing a project never touches its repos or any workspace.
+    func removeProject(_ p: Project) {
+        state.projects.removeAll { $0.id == p.id }
+        save()
+    }
 
     // MARK: Workspaces
 

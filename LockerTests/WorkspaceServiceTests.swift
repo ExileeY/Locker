@@ -237,7 +237,7 @@ final class WorkspaceServiceTests: XCTestCase {
         }
         let json = #"{"schemaVersion":1,"repos":[],"workspaces":[{"id":"\#(UUID().uuidString)","name":"w","branch":"feat","repos":[\#(repo(pre: false)),\#(repo(pre: true))],"terminals":[],"root":"/r"}]}"#
         let st = try JSONDecoder().decode(AppState.self, from: Data(json.utf8))
-        XCTAssertEqual(st.schemaVersion, 2)
+        XCTAssertEqual(st.schemaVersion, 3)
         let r = st.workspaces[0].repos
         XCTAssertEqual(r[0].ownedBranches, ["feat"]); XCTAssertEqual(r[1].ownedBranches, [])
         XCTAssertEqual(r.map(\.lastBranch), ["feat", "feat"])
