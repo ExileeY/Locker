@@ -1,0 +1,31 @@
+Locker/App/AppModel.swift
+  s_df1d7f902ab911::t_dac63fa2dbf034 3-4,13-15,69,134-136,139-191,219-220,222-242
+Locker/LockerApp.swift
+  s_df1d7f902ab911::t_0865176b53853f 18
+Locker/Models/RepoProjectOps.swift
+  s_df1d7f902ab911::t_05eb885d7cb086 1-53
+Locker/Views/ContentView.swift
+  s_df1d7f902ab911::t_a3d43104e43a5a 11-13,103-104,106-108
+Locker/Views/Sheets.swift
+  s_df1d7f902ab911::t_ce256b027a0092 119-124,161
+LockerTests/RepoProjectOpsTests.swift
+  s_df1d7f902ab911::t_787204189614bc 1-76
+Locker/Views/SettingsView.swift
+  s_df1d7f902ab911::t_a605b05780fe4a 1-275
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "52d7f440882d13fbbc8d52f84b823517de56f688",
+  "prompts": {},
+  "sessions": {
+    "s_df1d7f902ab911": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "03411607-4aae-4917-ac99-34988c8210b6",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
