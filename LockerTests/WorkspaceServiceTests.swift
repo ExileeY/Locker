@@ -242,4 +242,23 @@ final class WorkspaceServiceTests: XCTestCase {
         XCTAssertEqual(r[0].ownedBranches, ["feat"]); XCTAssertEqual(r[1].ownedBranches, [])
         XCTAssertEqual(r.map(\.lastBranch), ["feat", "feat"])
     }
+
+    // MARK: rename
+
+    func testRenameChangesNameOnlyAndKeepsWorktrees() throws {
+        let ws = try svc.create(name: "Task 1", branch: "task-1", selections: sel(), existingNames: [])
+        let r = try svc.rename(ws, to: "  Checkout flow ", existingNames: ["Task 1", "Other"])
+        XCTAssertEqual(r.name, "Checkout flow")
+        XCTAssertEqual(r.root, ws.root)
+        XCTAssertEqual(r.repos, ws.repos)
+        XCTAssertEqual(r.id, ws.id)
+        XCTAssertTrue(svc.missingWorktrees(r, repos: [backend, frontend]).isEmpty)
+    }
+
+    func testRenameRejectsBlankAndDuplicates() throws {
+        let ws = try svc.create(name: "Task 1", branch: "", selections: sel(), existingNames: [])
+        XCTAssertThrowsError(try svc.rename(ws, to: "   ", existingNames: ["Task 1"]))
+        XCTAssertThrowsError(try svc.rename(ws, to: "other", existingNames: ["Task 1", "Other"]))
+        XCTAssertEqual(try svc.rename(ws, to: "task 1", existingNames: ["Task 1"]).name, "task 1")   // case change of itself
+    }
 }

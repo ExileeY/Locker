@@ -14,7 +14,7 @@ struct WorkspaceDetail: View {
                     Button("Repair") { model.repair(ws) }.buttonStyle(OutlineButton())
                 }
                 .font(.system(size: 12)).padding(.horizontal, 20).padding(.vertical, 8)
-                .background(Color(hex: 0xFFF4E5))
+                .background(Theme.amberBG)
             }
             TerminalArea(ws: ws)
         }
@@ -22,13 +22,77 @@ struct WorkspaceDetail: View {
 
     var header: some View {
         HStack(spacing: 10) {
-            Text(ws.name).font(.system(size: 16, weight: .bold)).lineLimit(1)
+            WorkspaceTitle(ws: ws)
             ForEach(ws.repos) { r in BranchChip(ws: ws, repo: r, status: model.statuses[r.id], missing: model.missing.contains(r.id)) }
             Spacer()
+            Menu {
+                Button("Rename…") { model.renameRequest = ws.id }
+                Button("New terminal") { model.addTerminal() }
+                Divider()
+                Button("Delete workspace…", role: .destructive) { model.requestDelete(ws) }
+            } label: {
+                Image(systemName: "ellipsis.circle").font(.system(size: 15))
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .help("Workspace actions").accessibilityLabel("Workspace actions")
         }
         .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 60)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color(hex: 0xECECE8)).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.headerLine).frame(height: 1) }
     }
+}
+
+/// The workspace name with an inline rename (✎, the actions menu, or the sidebar's context menu).
+struct WorkspaceTitle: View {
+    @EnvironmentObject var model: AppModel
+    let ws: Workspace
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var error: String?
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if editing {
+                TextField("Workspace name", text: $draft)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 15, weight: .semibold)).frame(width: 220)
+                    .focused($focused)
+                    .onSubmit(commit)
+                    .onExitCommand(perform: cancel)
+                    .onChange(of: draft) { _, _ in error = nil }
+                    .onChange(of: focused) { _, f in if !f && editing { commit() } }
+                if let error {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.red)
+                        .help(error).accessibilityLabel(error)
+                    Text(error).font(.system(size: 11.5)).foregroundStyle(Theme.red).lineLimit(1)
+                }
+            } else {
+                Text(ws.name).font(.system(size: 16, weight: .bold)).lineLimit(1)
+                    .onTapGesture(count: 2, perform: begin)
+                Button(action: begin) { Image(systemName: "pencil").font(.system(size: 11, weight: .semibold)) }
+                    .buttonStyle(.plain).foregroundStyle(Theme.muted)
+                    .opacity(hovering ? 1 : 0.35)
+                    .help("Rename workspace").accessibilityLabel("Rename workspace")
+            }
+        }
+        .onHover { hovering = $0 }
+        .onAppear { if model.renameRequest == ws.id { begin() } }
+        .onChange(of: model.renameRequest) { _, id in if id == ws.id { begin() } }
+    }
+
+    private func begin() {
+        model.renameRequest = nil
+        draft = ws.name; error = nil; editing = true
+        DispatchQueue.main.async { focused = true }
+    }
+
+    private func commit() {
+        guard editing else { return }
+        if let failure = model.renameWorkspace(ws.id, to: draft) { error = failure; focused = true; return }
+        editing = false; error = nil
+    }
+
+    private func cancel() { editing = false; error = nil }
 }
 
 /// Per-repo branch chip. Clicking opens a picker to switch this repo's worktree only.
@@ -52,7 +116,7 @@ struct BranchChip: View {
                 if !missing { Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)) }
             }
             .font(Theme.mono(11.5)).padding(.horizontal, 8).padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 6).fill(missing || detached ? Color(hex: 0xFFF4E5) : Theme.chipBG))
+            .background(RoundedRectangle(cornerRadius: 6).fill(missing || detached ? Theme.amberBG : Theme.chipBG))
             .foregroundStyle(missing || detached ? Theme.amber : Theme.chipFG)
             .contentShape(Rectangle())
         }
@@ -106,7 +170,7 @@ struct BranchPicker: View {
                         Button(p.title) { run(p.run, confirmed: true) }.buttonStyle(PrimaryButton())
                     }
                 }
-                .padding(8).background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: 0xFFF4E5)))
+                .padding(8).background(RoundedRectangle(cornerRadius: 6).fill(Theme.amberBG))
             }
             if !detached {
                 row("Detach at \(repo.baseBranch)", note: "no branch") { await model.detach(ws, repo) }
@@ -187,7 +251,7 @@ struct TerminalArea: View {
                 .fixedSize(horizontal: false, vertical: true)
                 Button { model.addTerminal() } label: {
                     Image(systemName: "plus").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color(hex: 0xC8C8C2)).frame(width: 32, height: 32)
+                        .foregroundStyle(Theme.termText).frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain).help("New terminal tab (⌘T)").padding(.bottom, 3)
                 Spacer(minLength: 0)
@@ -199,16 +263,16 @@ struct TerminalArea: View {
                 if let active, let host = model.sessions.host(for: active) {
                     TerminalContainer(view: host.view).id(active.id).padding(.leading, 8).padding(.top, 4)
                 } else if active != nil {
-                    Text("This terminal's folder no longer exists.").foregroundStyle(Color(hex: 0xC8C8C2))
+                    Text("This terminal's folder no longer exists.").foregroundStyle(Theme.termText)
                 } else {
                     VStack(spacing: 12) {
                         Text("No terminals open in this workspace.")
                         Button("Open a terminal") { model.addTerminal() }
                             .buttonStyle(.plain).font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
                             .padding(.horizontal, 14).frame(height: 32)
-                            .background(RoundedRectangle(cornerRadius: 7).fill(Color(hex: 0x2A2A2F)))
-                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(hex: 0x45454A)))
-                    }.foregroundStyle(Color(hex: 0xC8C8C2))
+                            .background(RoundedRectangle(cornerRadius: 7).fill(Theme.termButtonBG))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.termButtonBorder))
+                    }.foregroundStyle(Theme.termText)
                 }
             }
         }
@@ -230,12 +294,12 @@ struct TabButton: View {
                     }
                 }
                 .padding(.leading, 12).padding(.trailing, 6).frame(height: 34)
-                .foregroundStyle(on ? Color.white : Color(hex: 0xA6A6A0))
+                .foregroundStyle(on ? Color.white : Theme.termMuted)
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
             Button { model.closeTerminal(spec.id) } label: {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Color(hex: 0xA6A6A0)).frame(width: 22, height: 22)
+                    .foregroundStyle(Theme.termMuted).frame(width: 22, height: 22)
             }.buttonStyle(.plain).padding(.trailing, 6).help("Close \(spec.title)")
         }
         .background(UnevenRoundedRectangle(topLeadingRadius: 8, topTrailingRadius: 8).fill(on ? Theme.termBG : .clear))
