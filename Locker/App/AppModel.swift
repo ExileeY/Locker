@@ -1,5 +1,7 @@
 import SwiftUI
 
+enum SettingsItem: Hashable { case none, project(UUID), unassigned }
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var state: AppState
@@ -8,8 +10,9 @@ final class AppModel: ObservableObject {
     @Published var missing: Set<UUID> = []             // WorkspaceRepo ids with no worktree
     @Published var errorMessage: String?
     @Published var showNewWorkspace = false
-    @Published var showRepos = false
-    @Published var showProjects = false
+    @Published var showSettings = false
+    @Published var settingsSelection: SettingsItem = .none
+    var pendingProjectID: UUID?   // project to preselect when the New Workspace sheet opens
     @Published var gitMissing = false
     @Published var sessionsVersion = 0
     @Published var toast: ToastMessage?
@@ -63,6 +66,7 @@ final class AppModel: ObservableObject {
     // MARK: Selection and sessions
 
     func select(_ id: UUID?) {
+        if id != nil { showSettings = false }
         selectedID = id
         guard let ws = selected else { return }
         for t in ws.terminals { _ = sessions.host(for: t) }   // spawn so background processes run
@@ -127,9 +131,64 @@ final class AppModel: ObservableObject {
         if state.workspaces.contains(where: { $0.repos.contains { $0.repoID == r.id } }) {
             errorMessage = "“\(r.name)” is used by a workspace. Delete that workspace first."; return
         }
-        state.repos.removeAll { $0.id == r.id }
+        guard let index = state.repos.firstIndex(where: { $0.id == r.id }) else { return }
+        let memberships = state.projects.filter { $0.repoIDs.contains(r.id) }.map(\.id)
+        state.repos.remove(at: index)
         state.removeRepoFromProjects(r.id)
         save()
+        showToast("Removed “\(r.name)”", undoTitle: "Undo") { [weak self] in
+            guard let self else { return }
+            self.state.repos.insert(r, at: min(index, self.state.repos.count))
+            for i in self.state.projects.indices where memberships.contains(self.state.projects[i].id) {
+                self.state.projects[i].repoIDs.append(r.id)
+            }
+            self.save()
+        }
+    }
+
+    func repos(in project: Project) -> [Repo] { project.members(in: state.repos) }
+
+    var unassignedRepos: [Repo] { state.unassignedRepos }
+
+    /// Registers the folder (if new) and links it to the project in one step. Returns an error message, or nil.
+    func addRepo(url: URL, to projectID: UUID) -> String? {
+        switch registerRepo(url: url) {
+        case .failed(let m): return m
+        case .added(let r), .existing(let r):
+            guard let project = state.projects.first(where: { $0.id == projectID }) else { return nil }
+            guard state.link(r.id, to: projectID) else { return "“\(r.name)” is already in this project." }
+            save()
+            showToast("Added “\(r.name)” to \(project.name)")
+            return nil
+        }
+    }
+
+    /// Links an already registered repo to a project.
+    func link(_ r: Repo, to projectID: UUID) {
+        if state.link(r.id, to: projectID) { save() }
+    }
+
+    /// Takes a repo out of one project. The repo stays registered.
+    func unlink(_ r: Repo, from projectID: UUID) {
+        guard let pos = state.unlink(r.id, from: projectID) else { return }
+        save()
+        let projectName = state.projects.first { $0.id == projectID }?.name ?? "project"
+        showToast("Removed “\(r.name)” from \(projectName)", undoTitle: "Undo") { [weak self] in
+            self?.state.relink(r.id, to: projectID, at: pos)
+            self?.save()
+        }
+    }
+
+    /// Branches a repo can use as its default: local first, then remote-only.
+    func branches(of r: Repo) -> [String] {
+        let list = service.git.listBranches(r.path)
+        var all = list.local + list.remoteOnly
+        if !all.contains(r.defaultBranch) { all.insert(r.defaultBranch, at: 0) }
+        return all
+    }
+
+    func setDefaultBranch(_ r: Repo, to branch: String) {
+        if state.setDefaultBranch(r.id, to: branch) { save() }
     }
 
     func repoMissing(_ r: Repo) -> Bool { !FileManager.default.fileExists(atPath: r.path) }
@@ -157,8 +216,30 @@ final class AppModel: ObservableObject {
 
     /// Removing a project never touches its repos or any workspace.
     func removeProject(_ p: Project) {
-        state.projects.removeAll { $0.id == p.id }
+        guard let index = state.projects.firstIndex(where: { $0.id == p.id }) else { return }
+        state.projects.remove(at: index)
         save()
+        if settingsSelection == .project(p.id) { settingsSelection = .none }
+        showToast("Removed project “\(p.name)”", undoTitle: "Undo") { [weak self] in
+            guard let self else { return }
+            self.state.projects.insert(p, at: min(index, self.state.projects.count))
+            self.save()
+        }
+    }
+
+    /// Creates an empty project with a unique placeholder name and returns its id.
+    @discardableResult
+    func addProject() -> UUID {
+        let name = state.newProjectName()
+        let p = Project(name: name)
+        state.projects.append(p)
+        save()
+        return p.id
+    }
+
+    func renameProject(_ id: UUID, to name: String) -> String? {
+        guard let p = state.projects.first(where: { $0.id == id }) else { return nil }
+        return saveProject(id: id, name: name, repoIDs: p.repoIDs)
     }
 
     // MARK: Workspaces

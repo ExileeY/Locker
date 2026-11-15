@@ -8,7 +8,9 @@ struct ContentView: View {
             NavigationSplitView {
                 SidebarView().navigationSplitViewColumnWidth(min: 230, ideal: 264, max: 340)
             } detail: {
-                if let ws = model.selected {
+                if model.showSettings {
+                    SettingsView()
+                } else if let ws = model.selected {
                     WorkspaceDetail(ws: ws).id(ws.id)
                 } else {
                     EmptyDetail()
@@ -25,8 +27,6 @@ struct ContentView: View {
         }
         .animation(.easeOut(duration: 0.2), value: model.toast)
         .sheet(isPresented: $model.showNewWorkspace) { NewWorkspaceSheet() }
-        .sheet(isPresented: $model.showRepos) { RepoSettings() }
-        .sheet(isPresented: $model.showProjects) { ProjectSettings() }
         .alert("Locker", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") { model.errorMessage = nil }
         } message: { Text(model.errorMessage ?? "") }
@@ -100,12 +100,12 @@ struct SidebarView: View {
                 }
             }
             Spacer(minLength: 0)
-            HStack(spacing: 4) {
-                Button("Repositories…") { model.showRepos = true }.buttonStyle(.plain)
-                    .font(.system(size: 12)).foregroundStyle(Theme.chipFG).padding(8)
-                Button("Projects…") { model.showProjects = true }.buttonStyle(.plain)
-                    .font(.system(size: 12)).foregroundStyle(Theme.chipFG).padding(8)
+            Button { model.showSettings = true } label: {
+                Label("Settings", systemImage: "gearshape").frame(maxWidth: .infinity, alignment: .leading)
             }
+            .buttonStyle(.plain).font(.system(size: 12.5, weight: model.showSettings ? .semibold : .regular))
+            .foregroundStyle(model.showSettings ? Theme.accent : Theme.chipFG)
+            .padding(8).help("Projects and repositories (⌘,)")
         }
         .padding(.horizontal, 10).padding(.top, 14)
         .background(Theme.sidebar)

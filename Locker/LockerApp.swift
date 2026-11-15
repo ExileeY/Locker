@@ -15,8 +15,7 @@ struct LockerApp: App {
                 Button("New Workspace…") { model.showNewWorkspace = true }.keyboardShortcut("n")
                 Button("New Terminal") { model.addTerminal() }.keyboardShortcut("t")
                     .disabled(model.selected == nil)
-                Button("Repositories…") { model.showRepos = true }.keyboardShortcut(",", modifiers: [.command, .shift])
-                Button("Projects…") { model.showProjects = true }.keyboardShortcut("p", modifiers: [.command, .shift])
+                Button("Settings…") { model.showSettings = true }.keyboardShortcut(",")
             }
             CommandMenu("Workspace") {
                 ForEach(0..<9, id: \.self) { i in
