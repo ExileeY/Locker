@@ -1,0 +1,27 @@
+Locker/Views/Sheets.swift
+  s_df1d7f902ab911::t_39d50c265ff1af 103,105,297,299
+Locker/Views/WorkspaceDetail.swift
+  s_df1d7f902ab911::t_1848c510bf9bdc 17,30,55,109,190,202,209-211,233,238
+Locker/App/AppModel.swift
+  s_df1d7f902ab911::t_f229e405b95d35 15-16,45-56
+Locker/Views/ContentView.swift
+  s_df1d7f902ab911::t_b1dfeb648c5b83 19-26,61,87-92,141,151,154-155
+Locker/Views/Theme.swift
+  s_df1d7f902ab911::t_2f3629f49c601e 2,8-21,24,26-53,56-66,75,93-179
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "252afa77c51a5a63e9452f0e170efd589ae70375",
+  "prompts": {},
+  "sessions": {
+    "s_df1d7f902ab911": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "03411607-4aae-4917-ac99-34988c8210b6",
+        "model": "unknown"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
