@@ -22,13 +22,77 @@ struct WorkspaceDetail: View {
 
     var header: some View {
         HStack(spacing: 10) {
-            Text(ws.name).font(.system(size: 16, weight: .bold)).lineLimit(1)
+            WorkspaceTitle(ws: ws)
             ForEach(ws.repos) { r in BranchChip(ws: ws, repo: r, status: model.statuses[r.id], missing: model.missing.contains(r.id)) }
             Spacer()
+            Menu {
+                Button("Rename…") { model.renameRequest = ws.id }
+                Button("New terminal") { model.addTerminal() }
+                Divider()
+                Button("Delete workspace…", role: .destructive) { model.requestDelete(ws) }
+            } label: {
+                Image(systemName: "ellipsis.circle").font(.system(size: 15))
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .help("Workspace actions").accessibilityLabel("Workspace actions")
         }
         .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 60)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.headerLine).frame(height: 1) }
     }
+}
+
+/// The workspace name with an inline rename (✎, the actions menu, or the sidebar's context menu).
+struct WorkspaceTitle: View {
+    @EnvironmentObject var model: AppModel
+    let ws: Workspace
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var error: String?
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if editing {
+                TextField("Workspace name", text: $draft)
+                    .textFieldStyle(.roundedBorder).font(.system(size: 15, weight: .semibold)).frame(width: 220)
+                    .focused($focused)
+                    .onSubmit(commit)
+                    .onExitCommand(perform: cancel)
+                    .onChange(of: draft) { _, _ in error = nil }
+                    .onChange(of: focused) { _, f in if !f && editing { commit() } }
+                if let error {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.red)
+                        .help(error).accessibilityLabel(error)
+                    Text(error).font(.system(size: 11.5)).foregroundStyle(Theme.red).lineLimit(1)
+                }
+            } else {
+                Text(ws.name).font(.system(size: 16, weight: .bold)).lineLimit(1)
+                    .onTapGesture(count: 2, perform: begin)
+                Button(action: begin) { Image(systemName: "pencil").font(.system(size: 11, weight: .semibold)) }
+                    .buttonStyle(.plain).foregroundStyle(Theme.muted)
+                    .opacity(hovering ? 1 : 0.35)
+                    .help("Rename workspace").accessibilityLabel("Rename workspace")
+            }
+        }
+        .onHover { hovering = $0 }
+        .onAppear { if model.renameRequest == ws.id { begin() } }
+        .onChange(of: model.renameRequest) { _, id in if id == ws.id { begin() } }
+    }
+
+    private func begin() {
+        model.renameRequest = nil
+        draft = ws.name; error = nil; editing = true
+        DispatchQueue.main.async { focused = true }
+    }
+
+    private func commit() {
+        guard editing else { return }
+        if let failure = model.renameWorkspace(ws.id, to: draft) { error = failure; focused = true; return }
+        editing = false; error = nil
+    }
+
+    private func cancel() { editing = false; error = nil }
 }
 
 /// Per-repo branch chip. Clicking opens a picker to switch this repo's worktree only.

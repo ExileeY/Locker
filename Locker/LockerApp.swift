@@ -12,10 +12,10 @@ struct LockerApp: App {
         }
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Workspace…") { model.showNewWorkspace = true }.keyboardShortcut("n")
+                Button("New Workspace…") { model.openComposer() }.keyboardShortcut("n")
                 Button("New Terminal") { model.addTerminal() }.keyboardShortcut("t")
                     .disabled(model.selected == nil)
-                Button("Settings…") { model.showSettings = true }.keyboardShortcut(",")
+                Button("Settings…") { model.openSettings() }.keyboardShortcut(",")
             }
             CommandMenu("Workspace") {
                 ForEach(0..<9, id: \.self) { i in

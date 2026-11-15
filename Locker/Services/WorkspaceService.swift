@@ -116,6 +116,19 @@ struct WorkspaceService {
                          activeTerminal: terms.first?.id, root: root)
     }
 
+    /// Renames a workspace. Only the display name changes: the folder, worktrees and branches stay where they are,
+    /// so running terminals and git's worktree links keep working.
+    func rename(_ ws: Workspace, to newName: String, existingNames: [String]) throws -> Workspace {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { throw GitError(command: "", output: "Enter a workspace name.", status: 1) }
+        if name != ws.name, existingNames.contains(where: { $0 != ws.name && $0.caseInsensitiveCompare(name) == .orderedSame }) {
+            throw GitError(command: "", output: "A workspace named “\(name)” already exists.", status: 1)
+        }
+        var out = ws
+        out.name = name
+        return out
+    }
+
     /// Per-repo status of `branch` for UI badges.
     func branchState(_ branch: String, in repo: Repo) -> BranchState {
         if git.branchExists(branch, in: repo.path) { return .existing }

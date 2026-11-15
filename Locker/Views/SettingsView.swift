@@ -138,9 +138,7 @@ private struct ProjectPage: View {
                     }
                     Spacer()
                     Button("New workspace") {
-                        model.showSettings = false
-                        model.pendingProjectID = project.id
-                        model.showNewWorkspace = true
+                        model.openComposer(project: project.id)
                     }
                     .buttonStyle(PrimaryButton()).disabled(repos.isEmpty)
                     .help(repos.isEmpty ? "Add a repository first" : "Create a workspace from this project")

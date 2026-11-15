@@ -2,6 +2,9 @@ import SwiftUI
 
 enum SettingsItem: Hashable { case none, project(UUID), unassigned }
 
+/// What the detail pane shows.
+enum DetailPage: Equatable { case workspace, settings, composer(projectID: UUID?) }
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var state: AppState
@@ -9,10 +12,15 @@ final class AppModel: ObservableObject {
     @Published var statuses: [UUID: GitStatus] = [:]   // keyed by WorkspaceRepo.id
     @Published var missing: Set<UUID> = []             // WorkspaceRepo ids with no worktree
     @Published var errorMessage: String?
-    @Published var showNewWorkspace = false
-    @Published var showSettings = false
+    @Published var page: DetailPage = .workspace
     @Published var settingsSelection: SettingsItem = .none
-    var pendingProjectID: UUID?   // project to preselect when the New Workspace sheet opens
+    /// Workspace whose title should switch to edit mode (set from the sidebar's context menu).
+    @Published var renameRequest: UUID?
+    /// Workspace waiting for delete confirmation, and what would be lost.
+    @Published var pendingDelete: Workspace?
+    var pendingDeleteWarnings: [DeleteWarning] = []
+    /// Claude Code activity per workspace id. Workspaces with no live terminal are absent (= `.none`).
+    @Published var activity: [UUID: ClaudeActivity] = [:]
     @Published var gitMissing = false
     @Published var sessionsVersion = 0
     @Published var toast: ToastMessage?
@@ -22,6 +30,7 @@ final class AppModel: ObservableObject {
     let service: WorkspaceService
     let sessions = SessionRegistry()
     private var timer: Timer?
+    private var activityTimer: Timer?
 
     init(store: Store = Store(), service: WorkspaceService = WorkspaceService()) {
         self.store = store
@@ -34,12 +43,21 @@ final class AppModel: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+        activityTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshActivity() }
+        }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
     }
 
     var selected: Workspace? { state.workspaces.first { $0.id == selectedID } }
+    var showSettings: Bool { page == .settings }
+
+    func openSettings() { page = .settings }
+    /// Opens the new-workspace composer, optionally with a project's repos ticked.
+    func openComposer(project: UUID? = nil) { page = .composer(projectID: project) }
+    func closePage() { page = .workspace }
     var totalTerminals: Int { state.workspaces.reduce(0) { $0 + $1.terminals.count } }
     var distinctBranches: Int { Set(state.workspaces.flatMap { $0.repos.compactMap(\.lastBranch) }).count }
 
@@ -66,7 +84,7 @@ final class AppModel: ObservableObject {
     // MARK: Selection and sessions
 
     func select(_ id: UUID?) {
-        if id != nil { showSettings = false }
+        if id != nil { page = .workspace }
         selectedID = id
         guard let ws = selected else { return }
         for t in ws.terminals { _ = sessions.host(for: t) }   // spawn so background processes run
@@ -262,7 +280,27 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func deleteWarnings(_ ws: Workspace) -> [DeleteWarning] { service.deleteWarnings(ws) }
+    /// Asks for confirmation before deleting; the dialog lives in `ContentView`.
+    func requestDelete(_ ws: Workspace) {
+        pendingDeleteWarnings = service.deleteWarnings(ws)
+        pendingDelete = ws
+    }
+
+    /// Returns nil on success, or the error text to show next to the title.
+    func renameWorkspace(_ id: UUID, to name: String) -> String? {
+        guard let ws = state.workspaces.first(where: { $0.id == id }) else { return nil }
+        do {
+            let renamed = try service.rename(ws, to: name, existingNames: state.workspaces.map(\.name))
+            guard renamed.name != ws.name else { return nil }
+            update(id) { $0.name = renamed.name }
+            showToast("Renamed to “\(renamed.name)”", undoTitle: "Undo") { [weak self] in
+                self?.update(id) { $0.name = ws.name }
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
 
     func deleteWorkspace(_ ws: Workspace) {
         for t in ws.terminals { sessions.close(t.id) }
@@ -329,6 +367,21 @@ final class AppModel: ObservableObject {
         }
         select(ws.id)
     }
+
+    // MARK: Claude Code activity
+
+    /// Checks every live terminal: is Claude Code its foreground job, and is it working or waiting for the user.
+    func refreshActivity() {
+        var out: [UUID: ClaudeActivity] = [:]
+        for ws in state.workspaces {
+            let states = ws.terminals.compactMap { sessions.liveHost($0.id)?.claudeActivity() }
+            let a = ClaudeActivity.combined(states)
+            if a != .none { out[ws.id] = a }
+        }
+        if out != activity { activity = out }
+    }
+
+    func activity(of ws: Workspace) -> ClaudeActivity { activity[ws.id] ?? .none }
 
     // MARK: Status
 
