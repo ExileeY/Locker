@@ -12,6 +12,8 @@ final class AppModel: ObservableObject {
     @Published var showProjects = false
     @Published var gitMissing = false
     @Published var sessionsVersion = 0
+    @Published var toast: ToastMessage?
+    private var toastTask: Task<Void, Never>?
 
     let store: Store
     let service: WorkspaceService
@@ -39,6 +41,18 @@ final class AppModel: ObservableObject {
     var distinctBranches: Int { Set(state.workspaces.flatMap { $0.repos.compactMap(\.lastBranch) }).count }
 
     func save() { store.save(state) }
+
+    /// Shows a transient confirmation. Pass `undo` to offer an Undo button.
+    func showToast(_ text: String, kind: FeedbackKind = .success, undoTitle: String? = nil, undo: (() -> Void)? = nil) {
+        toastTask?.cancel()
+        toast = ToastMessage(kind: kind, text: text, undoTitle: undoTitle, undo: undo)
+        let shownID = toast?.id
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: (undo == nil ? 3 : 6) * 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            if self?.toast?.id == shownID { self?.toast = nil }
+        }
+    }
 
     func update(_ id: UUID, _ f: (inout Workspace) -> Void) {
         guard let i = state.workspaces.firstIndex(where: { $0.id == id }) else { return }

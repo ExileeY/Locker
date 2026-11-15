@@ -14,7 +14,7 @@ struct WorkspaceDetail: View {
                     Button("Repair") { model.repair(ws) }.buttonStyle(OutlineButton())
                 }
                 .font(.system(size: 12)).padding(.horizontal, 20).padding(.vertical, 8)
-                .background(Color(hex: 0xFFF4E5))
+                .background(Theme.amberBG)
             }
             TerminalArea(ws: ws)
         }
@@ -27,7 +27,7 @@ struct WorkspaceDetail: View {
             Spacer()
         }
         .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 60)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color(hex: 0xECECE8)).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.headerLine).frame(height: 1) }
     }
 }
 
@@ -52,7 +52,7 @@ struct BranchChip: View {
                 if !missing { Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold)) }
             }
             .font(Theme.mono(11.5)).padding(.horizontal, 8).padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 6).fill(missing || detached ? Color(hex: 0xFFF4E5) : Theme.chipBG))
+            .background(RoundedRectangle(cornerRadius: 6).fill(missing || detached ? Theme.amberBG : Theme.chipBG))
             .foregroundStyle(missing || detached ? Theme.amber : Theme.chipFG)
             .contentShape(Rectangle())
         }
@@ -106,7 +106,7 @@ struct BranchPicker: View {
                         Button(p.title) { run(p.run, confirmed: true) }.buttonStyle(PrimaryButton())
                     }
                 }
-                .padding(8).background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: 0xFFF4E5)))
+                .padding(8).background(RoundedRectangle(cornerRadius: 6).fill(Theme.amberBG))
             }
             if !detached {
                 row("Detach at \(repo.baseBranch)", note: "no branch") { await model.detach(ws, repo) }
@@ -187,7 +187,7 @@ struct TerminalArea: View {
                 .fixedSize(horizontal: false, vertical: true)
                 Button { model.addTerminal() } label: {
                     Image(systemName: "plus").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color(hex: 0xC8C8C2)).frame(width: 32, height: 32)
+                        .foregroundStyle(Theme.termText).frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain).help("New terminal tab (⌘T)").padding(.bottom, 3)
                 Spacer(minLength: 0)
@@ -199,16 +199,16 @@ struct TerminalArea: View {
                 if let active, let host = model.sessions.host(for: active) {
                     TerminalContainer(view: host.view).id(active.id).padding(.leading, 8).padding(.top, 4)
                 } else if active != nil {
-                    Text("This terminal's folder no longer exists.").foregroundStyle(Color(hex: 0xC8C8C2))
+                    Text("This terminal's folder no longer exists.").foregroundStyle(Theme.termText)
                 } else {
                     VStack(spacing: 12) {
                         Text("No terminals open in this workspace.")
                         Button("Open a terminal") { model.addTerminal() }
                             .buttonStyle(.plain).font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
                             .padding(.horizontal, 14).frame(height: 32)
-                            .background(RoundedRectangle(cornerRadius: 7).fill(Color(hex: 0x2A2A2F)))
-                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(hex: 0x45454A)))
-                    }.foregroundStyle(Color(hex: 0xC8C8C2))
+                            .background(RoundedRectangle(cornerRadius: 7).fill(Theme.termButtonBG))
+                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.termButtonBorder))
+                    }.foregroundStyle(Theme.termText)
                 }
             }
         }
@@ -230,12 +230,12 @@ struct TabButton: View {
                     }
                 }
                 .padding(.leading, 12).padding(.trailing, 6).frame(height: 34)
-                .foregroundStyle(on ? Color.white : Color(hex: 0xA6A6A0))
+                .foregroundStyle(on ? Color.white : Theme.termMuted)
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
             Button { model.closeTerminal(spec.id) } label: {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(Color(hex: 0xA6A6A0)).frame(width: 22, height: 22)
+                    .foregroundStyle(Theme.termMuted).frame(width: 22, height: 22)
             }.buttonStyle(.plain).padding(.trailing, 6).help("Close \(spec.title)")
         }
         .background(UnevenRoundedRectangle(topLeadingRadius: 8, topTrailingRadius: 8).fill(on ? Theme.termBG : .clear))

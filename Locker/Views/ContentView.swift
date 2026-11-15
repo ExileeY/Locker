@@ -16,6 +16,14 @@ struct ContentView: View {
             }
             Footer()
         }
+        .overlay(alignment: .bottom) {
+            if let toast = model.toast {
+                ToastView(toast: toast) { model.toast = nil }
+                    .padding(.bottom, 44)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: model.toast)
         .sheet(isPresented: $model.showNewWorkspace) { NewWorkspaceSheet() }
         .sheet(isPresented: $model.showRepos) { RepoSettings() }
         .sheet(isPresented: $model.showProjects) { ProjectSettings() }
@@ -50,7 +58,7 @@ struct Footer: View {
             Spacer()
             Text("\(model.totalTerminals) terminals open across workspaces")
         }
-        .font(.system(size: 11.5)).foregroundStyle(Color(hex: 0x55554F))
+        .font(.system(size: 11.5)).foregroundStyle(Theme.secondary)
         .padding(.horizontal, 16).padding(.vertical, 7)
         .background(Theme.chrome)
         .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
@@ -76,8 +84,12 @@ struct SidebarView: View {
             ScrollView {
                 VStack(spacing: 4) {
                     ForEach(model.state.workspaces) { w in
-                        SidebarRow(ws: w, selected: w.id == model.selectedID)
-                            .onTapGesture { model.select(w.id) }
+                        Button { model.select(w.id) } label: {
+                            SidebarRow(ws: w, selected: w.id == model.selectedID)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(w.name), \(w.repos.count) repos")
+                        .accessibilityAddTraits(w.id == model.selectedID ? .isSelected : [])
                             .contextMenu {
                                 Button("Delete workspace…", role: .destructive) {
                                     warnings = model.deleteWarnings(w)
@@ -126,7 +138,7 @@ struct SidebarRow: View {
         let n = ws.terminals.count
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
-                Circle().fill(n > 0 ? Theme.green : Color(hex: 0x9A9A94)).frame(width: 8, height: 8)
+                Circle().fill(n > 0 ? Theme.green : Theme.idle).frame(width: 8, height: 8)
                 Text(ws.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Spacer()
                 Text("\(n) \(n == 1 ? "terminal" : "terminals")").font(.system(size: 11)).foregroundStyle(Theme.muted)
@@ -136,11 +148,11 @@ struct SidebarRow: View {
                 Text("\(ws.branchSummary) · \(ws.repos.count) \(ws.repos.count == 1 ? "repo" : "repos")")
                     .font(Theme.mono(11)).lineLimit(1)
             }
-            .foregroundStyle(Color(hex: 0x55554F)).padding(.leading, 16)
+            .foregroundStyle(Theme.secondary).padding(.leading, 16)
         }
         .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 9).fill(selected ? Color.white : .clear))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(selected ? Color(hex: 0xD6D6D1) : .clear))
+        .background(RoundedRectangle(cornerRadius: 9).fill(selected ? Theme.surface : .clear))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(selected ? Theme.selectedBorder : .clear))
         .shadow(color: .black.opacity(selected ? 0.07 : 0), radius: 2, y: 1)
         .contentShape(Rectangle())
     }

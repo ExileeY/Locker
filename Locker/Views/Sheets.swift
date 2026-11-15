@@ -100,9 +100,9 @@ struct NewWorkspaceSheet: View {
                 }
             }.frame(height: 150)
             if let error {
-                Text(error).font(.system(size: 12)).foregroundStyle(Color(hex: 0xB42318)).textSelection(.enabled)
+                Text(error).font(.system(size: 12)).foregroundStyle(Theme.red).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(8)
-                    .background(Color(hex: 0xFEF3F2)).overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(hex: 0xB42318).opacity(0.5)))
+                    .background(Theme.redBG).overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.red.opacity(0.5)))
                     .accessibilityIdentifier("create-error")
             }
             HStack {
@@ -294,9 +294,9 @@ struct ProjectSettings: View {
                 }
             }.frame(height: 180)
             if let error {
-                Text(error).font(.system(size: 12)).foregroundStyle(Color(hex: 0xB42318)).textSelection(.enabled)
+                Text(error).font(.system(size: 12)).foregroundStyle(Theme.red).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(8)
-                    .background(Color(hex: 0xFEF3F2)).overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(hex: 0xB42318).opacity(0.5)))
+                    .background(Theme.redBG).overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.red.opacity(0.5)))
             }
             HStack {
                 Spacer()

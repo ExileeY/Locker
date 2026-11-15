@@ -9,7 +9,6 @@ struct LockerApp: App {
             ContentView()
                 .environmentObject(model)
                 .frame(minWidth: 900, minHeight: 560)
-                .preferredColorScheme(.light)
         }
         .commands {
             CommandGroup(replacing: .newItem) {
