@@ -1,0 +1,43 @@
+Locker/App/AppModel.swift
+  s_512066d7aff7fd::t_0b9c737ad20c7f 5-7,15,17-23,33,46-48,55-60,87,283-303,371-385
+Locker/LockerApp.swift
+  s_512066d7aff7fd::t_a2ece8e1298922 15,18
+Locker/Terminal/TerminalHost.swift
+  s_512066d7aff7fd::t_30d9d35f96a305 10-11,39-46,79-81
+Locker/Views/ContentView.swift
+  s_512066d7aff7fd::t_7d7d19b09745f9 11-12,14-21,34-40,50-64,72,96-97,100-101,103,106-108,110,116-119,124,133-146,148-152,155-167,172-196,200-201,206,213-219,222-224
+Locker/Views/SettingsView.swift
+  s_512066d7aff7fd::t_3eb0b53a54e00f 141
+Locker/Views/WorkspaceDetail.swift
+  s_512066d7aff7fd::t_0f1197ddb35214 25,28-37,44-97
+LockerTests/RedesignLogicTests.swift
+  s_512066d7aff7fd::t_45da5476fd13c3 1-90
+LockerTests/WorkspaceServiceTests.swift
+  s_512066d7aff7fd::t_9da507ee7d03d5 245-263
+Locker/Models/ClaudeActivity.swift
+  s_512066d7aff7fd::t_5659507aaadb0d 1-42
+Locker/Models/ComposerOps.swift
+  s_512066d7aff7fd::t_866945c74016e3 1-39
+Locker/Services/ProcessInspector.swift
+  s_512066d7aff7fd::t_433f2e998c72e4 1-49
+Locker/Services/WorkspaceService.swift
+  s_512066d7aff7fd::t_37d812ff92e937 119-131
+Locker/Views/ComposerView.swift
+  s_512066d7aff7fd::t_6c491d85aac620 4-6,8-9,14-15,20,22-25,27-50,53,55-62,65-84,86-89,92-98,100-115,118-129,131-147,150,152-184,186-187,189-219,221-225,227-235,238-243,249,251,260,264,271-276,281,289-331,333
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "190f212aade70dcc8f0587650fd057d68a23b306",
+  "prompts": {},
+  "sessions": {
+    "s_512066d7aff7fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1e7ba3cf-ef10-459b-aa98-fca326ebc0a7",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
