@@ -1,4 +1,10 @@
 import SwiftUI
+import os
+
+/// Signposts for Instruments (Points of Interest track): time from a click until its screen is up.
+enum Perf {
+    static let signposter = OSSignposter(subsystem: "dev.locker.Locker", category: .pointsOfInterest)
+}
 
 enum SettingsItem: Hashable { case none, project(UUID), unassigned }
 
@@ -24,6 +30,12 @@ final class AppModel: ObservableObject {
     @Published var gitMissing = false
     @Published var sessionsVersion = 0
     @Published var toast: ToastMessage?
+    /// Branch lists and missing-folder flags per repo id, loaded off the main thread by `refreshRepoInfo()`.
+    /// Views read these instead of running git or touching the disk while they draw.
+    @Published private(set) var branchCache: [UUID: [String]] = [:]
+    @Published private(set) var missingRepos: Set<UUID> = []
+    /// Open "Settings" interval, ended once the page has appeared.
+    var settingsSignpost: OSSignpostIntervalState?
     private var toastTask: Task<Void, Never>?
 
     let store: Store
@@ -40,6 +52,7 @@ final class AppModel: ObservableObject {
         gitMissing = !service.git.isInstalled
         sessions.onExit = { [weak self] id in self?.closeTerminal(id) }
         select(selectedID)
+        refreshRepoInfo()
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
@@ -47,16 +60,38 @@ final class AppModel: ObservableObject {
             Task { @MainActor in self?.refreshActivity() }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+            Task { @MainActor in self?.refresh(); self?.refreshRepoInfo() }
         }
     }
 
     var selected: Workspace? { state.workspaces.first { $0.id == selectedID } }
     var showSettings: Bool { page == .settings }
 
-    func openSettings() { page = .settings }
+    func openSettings() {
+        if page != .settings { settingsSignpost = Perf.signposter.beginInterval("Open Settings") }
+        settingsSelection = resolvedSettingsSelection()   // decided before the first draw, so it draws once
+        page = .settings
+        refreshRepoInfo()
+    }
     /// Opens the new-workspace composer.
-    func openComposer() { page = .composer }
+    func openComposer() { page = .composer; refreshRepoInfo() }
+
+    /// Called by SettingsView once it is on screen.
+    func settingsDidAppear() {
+        if let s = settingsSignpost { Perf.signposter.endInterval("Open Settings", s) }
+        settingsSignpost = nil
+    }
+
+    /// Keeps a still-valid settings selection; otherwise the first project, then "Not in a project", then none.
+    func resolvedSettingsSelection() -> SettingsItem {
+        switch settingsSelection {
+        case .project(let id) where state.projects.contains(where: { $0.id == id }): return settingsSelection
+        case .unassigned where !unassignedRepos.isEmpty: return settingsSelection
+        default: break
+        }
+        if let first = state.projects.first { return .project(first.id) }
+        return unassignedRepos.isEmpty ? .none : .unassigned
+    }
     func closePage() { page = .workspace }
     var totalTerminals: Int { state.workspaces.reduce(0) { $0 + $1.terminals.count } }
     var distinctBranches: Int { Set(state.workspaces.flatMap { $0.repos.compactMap(\.lastBranch) }).count }
@@ -125,24 +160,28 @@ final class AppModel: ObservableObject {
     enum AddRepoResult { case added(Repo), existing(Repo), failed(String) }
 
     /// Registers a repo. Failures are returned (so a sheet can show them inline) and not shown as the global alert.
-    func registerRepo(url: URL) -> AddRepoResult {
-        let path = url.path
-        let git = service.git
-        guard git.isRepo(path) else { return .failed("“\(url.lastPathComponent)” is not a git repository.") }
-        let top = (try? git.run(["rev-parse", "--show-toplevel"], in: path))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? path
-        if let r = state.repos.first(where: { $0.path == top }) { return .existing(r) }
-        let name = URL(fileURLWithPath: top).lastPathComponent
+    /// The git checks run off the main thread; duplicates are checked afterwards against the current state.
+    func registerRepo(url: URL) async -> AddRepoResult {
+        let signpost = Perf.signposter.beginInterval("Register repo")
+        defer { Perf.signposter.endInterval("Register repo", signpost) }
+        let path = url.path, git = service.git
+        let probe: (top: String, branch: String)? = await Task.detached {
+            guard git.isRepo(path) else { return nil }
+            let top = (try? git.run(["rev-parse", "--show-toplevel"], in: path))?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? path
+            return (top, git.detectDefaultBranch(top))
+        }.value
+        guard let probe else { return .failed("“\(url.lastPathComponent)” is not a git repository.") }
+        if let r = state.repos.first(where: { $0.path == probe.top }) { return .existing(r) }
+        let name = URL(fileURLWithPath: probe.top).lastPathComponent
         guard !state.repos.contains(where: { $0.name == name }) else {
             return .failed("A repository named “\(name)” is already registered.")
         }
-        let repo = Repo(name: name, path: top, defaultBranch: git.detectDefaultBranch(top))
+        let repo = Repo(name: name, path: probe.top, defaultBranch: probe.branch)
         state.repos.append(repo)
         save()
+        refreshRepoInfo()
         return .added(repo)
-    }
-
-    func addRepo(url: URL) {
-        if case .failed(let m) = registerRepo(url: url) { errorMessage = m }
     }
 
     func removeRepo(_ r: Repo) {
@@ -169,8 +208,8 @@ final class AppModel: ObservableObject {
     var unassignedRepos: [Repo] { state.unassignedRepos }
 
     /// Registers the folder (if new) and links it to the project in one step. Returns an error message, or nil.
-    func addRepo(url: URL, to projectID: UUID) -> String? {
-        switch registerRepo(url: url) {
+    func addRepo(url: URL, to projectID: UUID) async -> String? {
+        switch await registerRepo(url: url) {
         case .failed(let m): return m
         case .added(let r), .existing(let r):
             guard let project = state.projects.first(where: { $0.id == projectID }) else { return nil }
@@ -197,19 +236,38 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Branches a repo can use as its default: local first, then remote-only.
+    /// Branches a repo can use as its default: local first, then remote-only. Reads the cache only, so it is
+    /// safe to call while drawing; until the cache is filled it lists just the current default.
     func branches(of r: Repo) -> [String] {
-        let list = service.git.listBranches(r.path)
-        var all = list.local + list.remoteOnly
+        var all = branchCache[r.id] ?? []
         if !all.contains(r.defaultBranch) { all.insert(r.defaultBranch, at: 0) }
         return all
+    }
+
+    /// Loads every repo's branch list and checks its folder exists, off the main thread, then publishes the results.
+    func refreshRepoInfo() {
+        let git = service.git, repos = state.repos
+        Task.detached {
+            var branches: [UUID: [String]] = [:]
+            var missing: Set<UUID> = []
+            for r in repos {
+                guard FileManager.default.fileExists(atPath: r.path) else { missing.insert(r.id); continue }
+                let list = git.listBranches(r.path)
+                branches[r.id] = list.local + list.remoteOnly
+            }
+            await MainActor.run {
+                if self.branchCache != branches { self.branchCache = branches }
+                if self.missingRepos != missing { self.missingRepos = missing }
+            }
+        }
     }
 
     func setDefaultBranch(_ r: Repo, to branch: String) {
         if state.setDefaultBranch(r.id, to: branch) { save() }
     }
 
-    func repoMissing(_ r: Repo) -> Bool { !FileManager.default.fileExists(atPath: r.path) }
+    /// From the cache filled by `refreshRepoInfo()`; no disk access while drawing.
+    func repoMissing(_ r: Repo) -> Bool { missingRepos.contains(r.id) }
 
     // MARK: Projects
 

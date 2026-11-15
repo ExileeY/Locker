@@ -13,6 +13,7 @@ struct ComposerView: View {
     @State private var query = ""
     @State private var showAdvanced = false
     @State private var busy = false
+    @State private var adding = false
     @State private var error: String?
     @State private var progress = ""
     @State private var branchStates: [UUID: BranchState] = [:]
@@ -126,6 +127,8 @@ struct ComposerView: View {
                     }
                 }
                 .buttonStyle(OutlineButton(height: 24))
+                .disabled(adding)
+                .overlay(alignment: .leading) { if adding { ProgressView().controlSize(.small).offset(x: -22) } }
                 .help("Links a folder on your Mac. Nothing is copied.")
             }
 
@@ -293,13 +296,17 @@ struct ComposerView: View {
     }
 
     func pickRepo() {
-        guard let u = pickRepositoryFolder() else { return }
-        switch model.registerRepo(url: u) {
-        case .added(let r), .existing(let r):
-            if let selectedProject { model.link(r, to: selectedProject) }   // keep the new repo inside the project's grid
-            chosen.insert(r.id); error = nil
-            if ComposerOps.filter([r], query: query).isEmpty { query = "" }   // keep the new repo visible
-        case .failed(let m): error = m
+        guard !adding, let u = RepositoryPicker.pick() else { return }
+        adding = true
+        Task {
+            defer { adding = false }
+            switch await model.registerRepo(url: u) {
+            case .added(let r), .existing(let r):
+                if let selectedProject { model.link(r, to: selectedProject) }   // keep the new repo inside the project's grid
+                chosen.insert(r.id); error = nil
+                if ComposerOps.filter([r], query: query).isEmpty { query = "" }   // keep the new repo visible
+            case .failed(let m): error = m
+            }
         }
     }
 

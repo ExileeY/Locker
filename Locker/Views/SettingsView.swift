@@ -1,15 +1,33 @@
 import SwiftUI
 import AppKit
 
-/// The one folder picker used everywhere a repository is added.
+/// The one folder picker used everywhere a repository is added. The panel is created once (see `prewarm()`)
+/// and reused, so a click doesn't pay NSOpenPanel's start-up cost each time.
 @MainActor
-func pickRepositoryFolder() -> URL? {
-    let p = NSOpenPanel()
-    p.canChooseDirectories = true
-    p.canChooseFiles = false
-    p.prompt = "Add"
-    p.message = "Choose a git repository. Locker links the folder; nothing is copied."
-    return p.runModal() == .OK ? p.url : nil
+enum RepositoryPicker {
+    private static let panel: NSOpenPanel = {
+        let p = NSOpenPanel()
+        p.canChooseDirectories = true
+        p.canChooseFiles = false
+        p.prompt = "Add"
+        p.message = "Choose a git repository. Locker links the folder; nothing is copied."
+        return p
+    }()
+
+    /// Creates the panel ahead of time. Call once after launch, while the app is idle.
+    static func prewarm() { _ = panel }
+
+    static func pick() -> URL? {
+        let signpost = Perf.signposter.beginInterval("Open folder picker")
+        // End the interval when the panel is on screen and key, not when runModal returns.
+        var token: NSObjectProtocol?
+        token = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main) { _ in
+            Perf.signposter.endInterval("Open folder picker", signpost)
+            if let token { NotificationCenter.default.removeObserver(token) }
+        }
+        defer { if let token { NotificationCenter.default.removeObserver(token) } }
+        return panel.runModal() == .OK ? panel.url : nil
+    }
 }
 
 /// Full-page settings: projects on the left, the selected project's repositories on the right.
@@ -35,19 +53,14 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(Theme.surface)
-        .onAppear { ensureSelection() }
+        // The selection is resolved in openSettings() before the first draw; here only keep it valid afterwards.
+        .onAppear { DispatchQueue.main.async { model.settingsDidAppear() } }
         .onChange(of: model.state.projects) { _, _ in ensureSelection() }
     }
 
     private func ensureSelection() {
-        switch model.settingsSelection {
-        case .project(let id) where model.state.projects.contains(where: { $0.id == id }): return
-        case .unassigned where !model.unassignedRepos.isEmpty: return
-        default: break
-        }
-        if let first = model.state.projects.first { model.settingsSelection = .project(first.id) }
-        else if !model.unassignedRepos.isEmpty { model.settingsSelection = .unassigned }
-        else { model.settingsSelection = .none }
+        let resolved = model.resolvedSettingsSelection()
+        if resolved != model.settingsSelection { model.settingsSelection = resolved }
     }
 }
 
@@ -146,6 +159,7 @@ private struct ProjectPage: View {
     let project: Project
     @State private var name: String
     @State private var error: String?
+    @State private var adding = false
     @FocusState private var nameFocused: Bool
 
     init(project: Project) {
@@ -172,8 +186,9 @@ private struct ProjectPage: View {
                 HStack {
                     Text("Repositories · \(repos.count)").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
                     Spacer()
+                    if adding { ProgressView().controlSize(.small) }
                     Button { addRepository() } label: { Label("Add repository…", systemImage: "plus") }
-                        .buttonStyle(OutlineButton())
+                        .buttonStyle(OutlineButton()).disabled(adding)
                 }
                 Text("Links a folder on your Mac. Nothing is copied.").font(.system(size: 11.5)).foregroundStyle(Theme.muted)
 
@@ -222,8 +237,12 @@ private struct ProjectPage: View {
     }
 
     private func addRepository() {
-        guard let url = pickRepositoryFolder() else { return }
-        error = model.addRepo(url: url, to: project.id)
+        guard !adding, let url = RepositoryPicker.pick() else { return }
+        adding = true
+        Task {
+            error = await model.addRepo(url: url, to: project.id)
+            adding = false
+        }
     }
 }
 
