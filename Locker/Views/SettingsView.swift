@@ -53,6 +53,8 @@ struct SettingsView: View {
 
 private struct ProjectList: View {
     @EnvironmentObject var model: AppModel
+    @State private var hovered: SettingsItem?
+    @State private var pendingDelete: Project?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -70,7 +72,7 @@ private struct ProjectList: View {
             ScrollView {
                 VStack(spacing: 4) {
                     ForEach(model.state.projects) { p in
-                        row(title: p.name, subtitle: "\(model.repos(in: p).count) repos", item: .project(p.id))
+                        projectRow(p)
                     }
                     if !model.unassignedRepos.isEmpty {
                         row(title: "Not in a project", subtitle: "\(model.unassignedRepos.count) repos", item: .unassigned)
@@ -80,17 +82,44 @@ private struct ProjectList: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10).padding(.top, 14)
+        .confirmationDialog("Delete “\(pendingDelete?.name ?? "")”?",
+                            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible, presenting: pendingDelete) { p in
+            Button("Delete project", role: .destructive) { model.removeProject(p) }
+        } message: { _ in Text("Its repositories stay registered and no workspace is touched. You can undo this.") }
     }
 
-    private func row(title: String, subtitle: String, item: SettingsItem) -> some View {
+    /// A project card: the select button plus a trash button (a sibling, not nested) shown on hover or selection.
+    private func projectRow(_ p: Project) -> some View {
+        let item = SettingsItem.project(p.id)
+        let showTrash = hovered == item || model.settingsSelection == item
+        return ZStack(alignment: .trailing) {
+            row(title: p.name, subtitle: "\(model.repos(in: p).count) repos", item: item, trailingInset: 28)
+            Button { pendingDelete = p } label: {
+                Image(systemName: "trash").font(.system(size: 11.5)).frame(width: 22, height: 22).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).foregroundStyle(Theme.red)
+            .padding(.trailing, 6)
+            .opacity(showTrash ? 1 : 0).allowsHitTesting(showTrash)
+            .help("Delete project").accessibilityLabel("Delete project \(p.name)")
+        }
+        .onHover { inside in
+            if inside { hovered = item } else if hovered == item { hovered = nil }
+        }
+        .contextMenu {
+            Button("Delete project…", role: .destructive) { pendingDelete = p }
+        }
+    }
+
+    private func row(title: String, subtitle: String, item: SettingsItem, trailingInset: CGFloat = 0) -> some View {
         let selected = model.settingsSelection == item
         return Button { model.settingsSelection = item } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Text(subtitle).font(.system(size: 11)).foregroundStyle(Theme.muted)
             }
-            .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 9).fill(selected ? Theme.surface : .clear))
+            .padding(10).padding(.trailing, trailingInset).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 9).fill(selected ? Theme.surface : (hovered == item ? Theme.border.opacity(0.5) : .clear)))
             .overlay(RoundedRectangle(cornerRadius: 9).stroke(selected ? Theme.selectedBorder : .clear))
             .contentShape(Rectangle())
         }
@@ -117,7 +146,7 @@ private struct ProjectPage: View {
     let project: Project
     @State private var name: String
     @State private var error: String?
-    @State private var confirmDelete = false
+    @FocusState private var nameFocused: Bool
 
     init(project: Project) {
         self.project = project
@@ -128,22 +157,15 @@ private struct ProjectPage: View {
         let repos = model.repos(in: project)
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Project name").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
-                        TextField("Storefront", text: $name)
-                            .textFieldStyle(.roundedBorder).frame(maxWidth: 320)
-                            .onSubmit(commitName)
-                            .onChange(of: name) { _, _ in error = nil }
-                    }
-                    Spacer()
-                    Button("New workspace") {
-                        model.openComposer(project: project.id)
-                    }
-                    .buttonStyle(PrimaryButton()).disabled(repos.isEmpty)
-                    .help(repos.isEmpty ? "Add a repository first" : "Create a workspace from this project")
-                    Button(role: .destructive) { confirmDelete = true } label: { Image(systemName: "trash") }
-                        .buttonStyle(OutlineButton()).help("Delete project").accessibilityLabel("Delete project")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Project name").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.muted)
+                    TextField("Storefront", text: $name)
+                        .textFieldStyle(.roundedBorder).frame(maxWidth: 320)
+                        .focused($nameFocused)
+                        .onSubmit { nameFocused = false; commitName() }
+                        .onExitCommand { name = project.name; error = nil; nameFocused = false }
+                        .onChange(of: name) { _, _ in error = nil }
+                        .onChange(of: nameFocused) { _, focused in if !focused { commitName() } }
                 }
                 if let error { Banner(kind: .error, message: error) }
 
@@ -169,10 +191,10 @@ private struct ProjectPage: View {
                 }
             }
             .padding(24)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .contentShape(Rectangle())
+            .onTapGesture { resignNameFocus() }   // clicking empty space ends editing (and saves)
         }
-        .confirmationDialog("Delete “\(project.name)”?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete project", role: .destructive) { model.removeProject(project) }
-        } message: { Text("Its repositories stay registered and no workspace is touched. You can undo this.") }
         .onDisappear { if name != project.name { commitName() } }
     }
 
@@ -183,6 +205,13 @@ private struct ProjectPage: View {
         }
         .frame(maxWidth: .infinity, minHeight: 90)
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
+    }
+
+    /// SwiftUI on macOS doesn't drop text focus on a background click, so do it explicitly.
+    private func resignNameFocus() {
+        guard nameFocused else { return }
+        nameFocused = false
+        NSApp.keyWindow?.makeFirstResponder(nil)
     }
 
     private func commitName() {

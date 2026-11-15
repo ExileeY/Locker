@@ -11,8 +11,8 @@ struct ContentView: View {
                 switch model.page {
                 case .settings:
                     SettingsView()
-                case .composer(let projectID):
-                    ComposerView(initialProject: projectID).id(projectID)
+                case .composer:
+                    ComposerView()
                 case .workspace:
                     if let ws = model.selected {
                         WorkspaceDetail(ws: ws).id(ws.id)

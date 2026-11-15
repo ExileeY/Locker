@@ -1,11 +1,10 @@
 import SwiftUI
 import AppKit
 
-/// Inline new-workspace composer shown in the detail pane: name, project chips, a searchable repo grid,
-/// and a collapsed Advanced section for the branch name and per-repo bases.
+/// Inline new-workspace composer shown in the detail pane: name, a single-select project picker that narrows
+/// the searchable repo grid to that project, and a collapsed Advanced section for the branch name and per-repo bases.
 struct ComposerView: View {
     @EnvironmentObject var model: AppModel
-    let initialProject: UUID?
 
     @State private var name = ""
     @State private var branch = ""
@@ -17,11 +16,20 @@ struct ComposerView: View {
     @State private var error: String?
     @State private var progress = ""
     @State private var branchStates: [UUID: BranchState] = [:]
+    @State private var selectedProject: UUID?
+    /// Set by a Create click that failed validation; from then on issues are shown in red next to their fields.
+    @State private var showIssues = false
     @FocusState private var nameFocused: Bool
 
     private var repos: [Repo] { model.state.repos }
-    private var shown: [Repo] { ComposerOps.filter(repos, query: query) }
-    private var chosenRepos: [Repo] { repos.filter { chosen.contains($0.id) } }
+    private var visible: [Repo] { ComposerOps.visibleRepos(project: selectedProject, projects: model.state.projects, repos: repos) }
+    private var shown: [Repo] { ComposerOps.filter(visible, query: query) }
+    private var chosenRepos: [Repo] { visible.filter { chosen.contains($0.id) } }
+    private var issue: ComposerIssue? {
+        ComposerOps.validate(name: name, chosen: chosenRepos, branch: branch, branchStates: branchStates, bases: bases)
+    }
+    /// The issue to show inline, only after the user tried to create.
+    private var shownIssue: ComposerIssue? { showIssues ? issue : nil }
     private func usable(_ r: Repo) -> Bool { !model.repoMissing(r) }
 
     var body: some View {
@@ -41,12 +49,7 @@ struct ComposerView: View {
             footer
         }
         .background(Theme.surface)
-        .onAppear {
-            if let id = initialProject, let p = model.state.projects.first(where: { $0.id == id }) {
-                chosen = ComposerOps.toggleProject(p, chosen: [], repos: repos, isUsable: usable)
-            }
-            nameFocused = true
-        }
+        .onAppear { nameFocused = true }
         .onChange(of: chosen) { _, _ in error = nil }
     }
 
@@ -58,20 +61,21 @@ struct ComposerView: View {
             TextField("Apple Pay", text: $name)
                 .textFieldStyle(.roundedBorder).font(.system(size: 13)).frame(maxWidth: 360)
                 .focused($nameFocused)
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(shownIssue == .missingName ? Theme.red : .clear, lineWidth: 1.5))
                 .onChange(of: name) { _, _ in error = nil }
+                .accessibilityIdentifier("workspace-name")
+            if shownIssue == .missingName { issueText(.missingName) }
         }
     }
 
     private var projectChips: some View {
         VStack(alignment: .leading, spacing: 6) {
-            label("Start from a project")
+            label("Project")
             FlowLayout(spacing: 6) {
                 ForEach(model.state.projects) { p in
-                    let on = ComposerOps.isProjectOn(p, chosen: chosen, repos: repos, isUsable: usable)
+                    let on = selectedProject == p.id
                     let count = p.members(in: repos).count
-                    Button {
-                        chosen = ComposerOps.toggleProject(p, chosen: chosen, repos: repos, isUsable: usable)
-                    } label: {
+                    Button { selectProject(on ? nil : p.id) } label: {
                         HStack(spacing: 5) {
                             if on { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)) }
                             Text(p.name).fontWeight(.medium)
@@ -84,7 +88,7 @@ struct ComposerView: View {
                         .contentShape(Capsule())
                     }
                     .buttonStyle(.plain).disabled(count == 0)
-                    .help(on ? "Clear \(p.name)'s repositories" : "Tick \(p.name)'s repositories")
+                    .help(on ? "Show every repository" : "Show only \(p.name)'s repositories")
                     .accessibilityLabel("\(p.name), \(count) repositories")
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
@@ -92,10 +96,18 @@ struct ComposerView: View {
         }
     }
 
+    /// Narrows the grid to one project (or every repo for nil) and ticks that project's usable repos.
+    private func selectProject(_ id: UUID?) {
+        selectedProject = id
+        chosen = ComposerOps.selection(for: id, projects: model.state.projects, repos: repos, isUsable: usable)
+        query = ""
+        error = nil
+    }
+
     private var repoSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                label("Repositories · \(chosen.count) of \(repos.count) selected")
+                label("Repositories · \(chosenRepos.count) of \(visible.count) selected")
                 Spacer()
                 Button("All") { chosen = ComposerOps.setAll(chosen, shown: shown, on: true, isUsable: usable) }
                     .help(query.isEmpty ? "Select every repository" : "Select the repositories shown")
@@ -106,6 +118,8 @@ struct ComposerView: View {
                     .help("Links a folder on your Mac. Nothing is copied.")
             }
             .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.chipFG)
+
+            if shownIssue == .noRepos { issueText(.noRepos) }
 
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
@@ -119,8 +133,8 @@ struct ComposerView: View {
             .background(RoundedRectangle(cornerRadius: 7).fill(Theme.chrome))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.line))
 
-            if repos.isEmpty {
-                Text("No repositories yet. Add one to get started.").foregroundStyle(Theme.muted).font(.system(size: 12.5))
+            if visible.isEmpty {
+                Text(selectedProject == nil ? "No repositories yet. Add one to get started." : "This project has no repositories. Add one to get started.").foregroundStyle(Theme.muted).font(.system(size: 12.5))
             } else if shown.isEmpty {
                 Text("No repositories match “\(query)”.").foregroundStyle(Theme.muted).font(.system(size: 12.5))
             } else {
@@ -168,8 +182,9 @@ struct ComposerView: View {
                     TextField("Leave empty to start detached at each repo's base", text: $branch)
                         .textFieldStyle(.roundedBorder).font(Theme.mono(12)).frame(maxWidth: 420)
                         .onChange(of: branch) { _, _ in error = nil }
-                        .task(id: BranchKey(branch: branch, repos: repos.map(\.id))) { await refreshBranchStates() }
+                        .task(id: BranchKey(branch: branch, repos: visible.map(\.id))) { await refreshBranchStates() }
                 }
+                if case .missingBase? = shownIssue, let shownIssue { issueText(shownIssue) }
                 if !chosenRepos.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         label(branch.isEmpty ? "Start each repo detached at" : "Base for repos where the branch is new")
@@ -215,13 +230,19 @@ struct ComposerView: View {
             if busy {
                 ProgressView().controlSize(.small)
                 Text(progress).font(.system(size: 11.5)).foregroundStyle(Theme.muted)
-            } else if let hint = disabledReason {
-                Text(hint).font(.system(size: 11.5)).foregroundStyle(Theme.muted)
+            } else if let issue {
+                if showIssues {
+                    Label(issue.message, systemImage: "exclamationmark.circle.fill")
+                        .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Theme.red)
+                        .accessibilityIdentifier("create-issue")
+                } else {
+                    Text(issue.message).font(.system(size: 11.5)).foregroundStyle(Theme.muted)
+                }
             }
             Spacer()
             Button("Cancel") { model.closePage() }.buttonStyle(OutlineButton()).keyboardShortcut(.cancelAction).disabled(busy)
             Button(createTitle) { create() }.buttonStyle(PrimaryButton())
-                .disabled(busy || disabledReason != nil)
+                .disabled(busy)
                 .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, 24).padding(.vertical, 12)
@@ -231,8 +252,13 @@ struct ComposerView: View {
 
     private var createTitle: String {
         if busy { return "Creating…" }
-        let n = chosen.count
+        let n = chosenRepos.count
         return n == 0 ? "Create workspace" : "Create workspace (\(n) \(n == 1 ? "repo" : "repos"))"
+    }
+
+    private func issueText(_ issue: ComposerIssue) -> some View {
+        Label(issue.message, systemImage: "exclamationmark.circle.fill")
+            .font(.system(size: 11.5)).foregroundStyle(Theme.red)
     }
 
     private func label(_ s: String) -> some View {
@@ -243,21 +269,10 @@ struct ComposerView: View {
 
     struct BranchKey: Equatable { var branch: String; var repos: [UUID] }
 
-    var disabledReason: String? {
-        if name.trimmingCharacters(in: .whitespaces).isEmpty { return "Enter a workspace name." }
-        if chosen.isEmpty { return "Select at least one repository." }
-        for r in chosenRepos {
-            if branch.isEmpty || branchStates[r.id] == .new, (bases[r.id] ?? r.defaultBranch).trimmingCharacters(in: .whitespaces).isEmpty {
-                return "Enter a base branch for \(r.name) under Advanced."
-            }
-        }
-        return nil
-    }
-
     func refreshBranchStates() async {
         try? await Task.sleep(nanoseconds: 250_000_000)   // debounce typing
         if Task.isCancelled { return }
-        let svc = model.service, b = branch, list = repos.filter(usable)
+        let svc = model.service, b = branch, list = visible.filter(usable)
         if b.isEmpty { branchStates = [:]; return }
         let result: [UUID: BranchState] = await Task.detached {
             var out: [UUID: BranchState] = [:]
@@ -271,6 +286,7 @@ struct ComposerView: View {
         guard let u = pickRepositoryFolder() else { return }
         switch model.registerRepo(url: u) {
         case .added(let r), .existing(let r):
+            if let selectedProject { model.link(r, to: selectedProject) }   // keep the new repo inside the project's grid
             chosen.insert(r.id); error = nil
             if ComposerOps.filter([r], query: query).isEmpty { query = "" }   // keep the new repo visible
         case .failed(let m): error = m
@@ -278,6 +294,15 @@ struct ComposerView: View {
     }
 
     func create() {
+        if let issue {
+            showIssues = true
+            switch issue {
+            case .missingName: nameFocused = true
+            case .noRepos: break
+            case .missingBase: withAnimation(.easeOut(duration: 0.15)) { showAdvanced = true }
+            }
+            return
+        }
         let sel = chosenRepos.map {
             RepoSelection(repo: $0, base: (bases[$0.id] ?? $0.defaultBranch).trimmingCharacters(in: .whitespaces))
         }
@@ -286,7 +311,7 @@ struct ComposerView: View {
             let failure = await model.createWorkspace(name: name.trimmingCharacters(in: .whitespaces), branch: branch, selections: sel,
                                                       progress: { msg in Task { @MainActor in progress = msg } })
             busy = false
-            if let failure { error = failure }   // success: createWorkspace selects the new workspace and leaves this page
+            if let failure { error = failure } else { showIssues = false }   // success: createWorkspace selects the new workspace and leaves this page
         }
     }
 }

@@ -3,7 +3,7 @@ import SwiftUI
 enum SettingsItem: Hashable { case none, project(UUID), unassigned }
 
 /// What the detail pane shows.
-enum DetailPage: Equatable { case workspace, settings, composer(projectID: UUID?) }
+enum DetailPage: Equatable { case workspace, settings, composer }
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -55,8 +55,8 @@ final class AppModel: ObservableObject {
     var showSettings: Bool { page == .settings }
 
     func openSettings() { page = .settings }
-    /// Opens the new-workspace composer, optionally with a project's repos ticked.
-    func openComposer(project: UUID? = nil) { page = .composer(projectID: project) }
+    /// Opens the new-workspace composer.
+    func openComposer() { page = .composer }
     func closePage() { page = .workspace }
     var totalTerminals: Int { state.workspaces.reduce(0) { $0 + $1.terminals.count } }
     var distinctBranches: Int { Set(state.workspaces.flatMap { $0.repos.compactMap(\.lastBranch) }).count }
