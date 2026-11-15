@@ -24,25 +24,33 @@ final class ComposerOpsTests: XCTestCase {
         XCTAssertEqual(chosen, [api.id])
     }
 
-    func testProjectChipTicksThenClears() {
-        let p = Project(name: "Shop", repoIDs: [api.id, web.id])
-        var chosen: Set<UUID> = [docs.id, api.id]
-        XCTAssertFalse(ComposerOps.isProjectOn(p, chosen: chosen, repos: all))
-        chosen = ComposerOps.toggleProject(p, chosen: chosen, repos: all)
-        XCTAssertEqual(chosen, [api.id, web.id, docs.id])
-        XCTAssertTrue(ComposerOps.isProjectOn(p, chosen: chosen, repos: all))
-        chosen = ComposerOps.toggleProject(p, chosen: chosen, repos: all)
-        XCTAssertEqual(chosen, [docs.id])
+    func testVisibleReposNarrowToProject() {
+        let shop = Project(name: "Shop", repoIDs: [web.id, api.id])
+        let projects = [shop]
+        XCTAssertEqual(ComposerOps.visibleRepos(project: nil, projects: projects, repos: all).map(\.name), ["api", "web", "docs"])
+        XCTAssertEqual(ComposerOps.visibleRepos(project: shop.id, projects: projects, repos: all).map(\.name), ["api", "web"])
+        // A project id that no longer exists falls back to every repo rather than an empty grid.
+        XCTAssertEqual(ComposerOps.visibleRepos(project: UUID(), projects: projects, repos: all).count, 3)
     }
 
-    func testProjectChipSkipsUnusableAndEmpty() {
-        let p = Project(name: "Shop", repoIDs: [api.id, web.id])
+    func testSelectionTicksUsableMembersOnly() {
+        let shop = Project(name: "Shop", repoIDs: [api.id, web.id])
         let webID = web.id
         let usable: (Repo) -> Bool = { $0.id != webID }
-        let chosen = ComposerOps.toggleProject(p, chosen: [], repos: all, isUsable: usable)
-        XCTAssertEqual(chosen, [api.id])
-        XCTAssertTrue(ComposerOps.isProjectOn(p, chosen: chosen, repos: all, isUsable: usable))
-        XCTAssertFalse(ComposerOps.isProjectOn(Project(name: "Empty"), chosen: chosen, repos: all))
+        XCTAssertEqual(ComposerOps.selection(for: shop.id, projects: [shop], repos: all, isUsable: usable), [api.id])
+        XCTAssertEqual(ComposerOps.selection(for: shop.id, projects: [shop], repos: all), [api.id, web.id])
+        XCTAssertTrue(ComposerOps.selection(for: nil, projects: [shop], repos: all).isEmpty)
+    }
+
+    func testValidateReportsFirstIssue() {
+        XCTAssertEqual(ComposerOps.validate(name: "  ", chosen: [api], branch: "", branchStates: [:], bases: [:]), .missingName)
+        XCTAssertEqual(ComposerOps.validate(name: "Pay", chosen: [], branch: "", branchStates: [:], bases: [:]), .noRepos)
+        XCTAssertEqual(ComposerOps.validate(name: "Pay", chosen: [api], branch: "", branchStates: [:], bases: [api.id: " "]),
+                       .missingBase(repoName: "api"))
+        // With a branch that already exists, the base is irrelevant.
+        XCTAssertNil(ComposerOps.validate(name: "Pay", chosen: [api], branch: "feat", branchStates: [api.id: .existing], bases: [api.id: ""]))
+        XCTAssertNil(ComposerOps.validate(name: "Pay", chosen: [api, web], branch: "", branchStates: [:], bases: [:]))
+        XCTAssertEqual(ComposerIssue.missingName.message, "Enter a workspace name.")
     }
 
     func testWorkspaceSearch() {

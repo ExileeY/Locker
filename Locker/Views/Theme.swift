@@ -68,13 +68,15 @@ enum Theme {
 }
 
 struct OutlineButton: ButtonStyle {
+    var height: CGFloat = 32
+    private var compact: Bool { height < 32 }
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .medium))
-            .padding(.horizontal, 12).frame(height: 32)
+            .font(.system(size: compact ? 12 : 13, weight: .medium))
+            .padding(.horizontal, compact ? 9 : 12).frame(height: height)
             .background(Theme.surface.opacity(configuration.isPressed ? 0.6 : 1))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.line))
-            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: compact ? 6 : 7).stroke(Theme.line))
+            .clipShape(RoundedRectangle(cornerRadius: compact ? 6 : 7))
             .foregroundStyle(Theme.text)
     }
 }

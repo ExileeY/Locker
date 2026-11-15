@@ -11,8 +11,8 @@ struct ContentView: View {
                 switch model.page {
                 case .settings:
                     SettingsView()
-                case .composer(let projectID):
-                    ComposerView(initialProject: projectID).id(projectID)
+                case .composer:
+                    ComposerView()
                 case .workspace:
                     if let ws = model.selected {
                         WorkspaceDetail(ws: ws).id(ws.id)
@@ -41,6 +41,11 @@ struct ContentView: View {
         .alert("Locker", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") { model.errorMessage = nil }
         } message: { Text(model.errorMessage ?? "") }
+        .task {
+            // Build the folder picker while idle, so the first "Add repository…" click doesn't pay for it.
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            RepositoryPicker.prewarm()
+        }
         .alert("Git is not installed", isPresented: $model.gitMissing) {
             Button("OK") {}
         } message: { Text("Locker needs /usr/bin/git. Install the Xcode command line tools (xcode-select --install) and relaunch.") }
