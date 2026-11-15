@@ -109,15 +109,25 @@ struct ComposerView: View {
             HStack(spacing: 10) {
                 label("Repositories · \(chosenRepos.count) of \(visible.count) selected")
                 Spacer()
-                Button("All") { chosen = ComposerOps.setAll(chosen, shown: shown, on: true, isUsable: usable) }
-                    .help(query.isEmpty ? "Select every repository" : "Select the repositories shown")
-                Text("/").foregroundStyle(Theme.muted)
-                Button("None") { chosen = ComposerOps.setAll(chosen, shown: shown, on: false) }
-                    .help(query.isEmpty ? "Clear the selection" : "Clear the repositories shown")
-                Button { pickRepo() } label: { Label("Add repository…", systemImage: "plus") }
-                    .help("Links a folder on your Mac. Nothing is copied.")
+                // Selection filters: plain links, grouped together.
+                HStack(spacing: 10) {
+                    Button("All") { chosen = ComposerOps.setAll(chosen, shown: shown, on: true, isUsable: usable) }
+                        .help(query.isEmpty ? "Select every repository" : "Select the repositories shown")
+                    Text("/").foregroundStyle(Theme.muted)
+                    Button("None") { chosen = ComposerOps.setAll(chosen, shown: shown, on: false) }
+                        .help(query.isEmpty ? "Clear the selection" : "Clear the repositories shown")
+                }
+                .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.chipFG)
+                Rectangle().fill(Theme.line).frame(width: 1, height: 16).accessibilityHidden(true)
+                // An action, not a filter: a bordered button so it doesn't read as a third toggle.
+                Button { pickRepo() } label: {
+                    Label { Text("Add repository…") } icon: {
+                        Image(systemName: "plus").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.muted)
+                    }
+                }
+                .buttonStyle(OutlineButton(height: 24))
+                .help("Links a folder on your Mac. Nothing is copied.")
             }
-            .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.chipFG)
 
             if shownIssue == .noRepos { issueText(.noRepos) }
 
