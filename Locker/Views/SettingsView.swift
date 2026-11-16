@@ -268,7 +268,7 @@ private struct UnassignedPage: View {
     }
 }
 
-/// One repository: name, path, an editable default branch, and a remove action.
+/// One repository: name, path, an editable default branch, remembered local files, and a remove action.
 private struct RepoRow: View {
     @EnvironmentObject var model: AppModel
     let repo: Repo
@@ -278,6 +278,29 @@ private struct RepoRow: View {
 
     var body: some View {
         let missing = model.repoMissing(repo)
+        VStack(alignment: .leading, spacing: 6) {
+            mainRow(missing: missing)
+            if !repo.carryOver.isEmpty { carryOverRow }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+    }
+
+    /// The remembered git-ignored paths the composer preselects for this repo, with a way to forget them.
+    private var carryOverRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("Local files preselected for new workspaces:").font(.system(size: 11)).foregroundStyle(Theme.muted)
+            Text(repo.carryOver.joined(separator: ", "))
+                .font(Theme.mono(11)).lineLimit(2).truncationMode(.tail)
+                .help(repo.carryOver.joined(separator: "\n"))
+            Spacer(minLength: 8)
+            Button("Forget") { model.clearCarryOver(repo) }
+                .buttonStyle(.plain).foregroundStyle(Theme.chipFG).font(.system(size: 11.5))
+                .help("New workspaces stop preselecting these files. You can pick them again when creating a workspace.")
+                .accessibilityLabel("Forget local files to copy for \(repo.name)")
+        }
+    }
+
+    private func mainRow(missing: Bool) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(repo.name).fontWeight(.medium)
@@ -299,7 +322,6 @@ private struct RepoRow: View {
             Button(removeTitle, role: .destructive, action: remove)
                 .buttonStyle(.plain).foregroundStyle(Theme.red).font(.system(size: 12))
         }
-        .padding(.horizontal, 12).padding(.vertical, 9)
     }
 
     private var defaultBranchMenu: some View {

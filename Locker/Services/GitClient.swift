@@ -140,6 +140,18 @@ struct GitClient {
         try run(["fetch", "--no-tags", "origin"], in: dir, timeout: timeout)
     }
 
+    /// Untracked paths ignored by the repo's ignore rules (or, with `excludeFrom`, matched by that pattern file
+    /// instead), relative to `dir`, which must be the repo's top level. With `collapse`, a folder whose whole
+    /// content is ignored is listed once with a trailing "/" (and git doesn't look inside untracked folders);
+    /// without it every file is listed. `within` limits the listing to those literal paths.
+    func ignoredEntries(in dir: String, excludeFrom: String? = nil, collapse: Bool = true, within: [String] = []) -> [String] {
+        let rules = excludeFrom.map { ["--exclude-from=" + $0] } ?? ["--exclude-standard"]
+        let shape = collapse ? ["--directory", "--no-empty-directory"] : []
+        let args = ["--literal-pathspecs", "ls-files", "--others", "--ignored"] + rules + shape + ["-z", "--"] + within
+        let out = (try? run(args, in: dir)) ?? ""
+        return out.split(separator: "\0").map(String.init)
+    }
+
     /// Commits local `branch` has that `origin/<branch>` lacks, and the reverse, from refs already on disk.
     /// Nil when either side doesn't exist.
     func aheadBehindOrigin(_ branch: String, in dir: String) -> (ahead: Int, behind: Int)? {

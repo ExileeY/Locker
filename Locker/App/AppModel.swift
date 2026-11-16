@@ -268,6 +268,17 @@ final class AppModel: ObservableObject {
         if state.setDefaultBranch(r.id, to: branch) { save() }
     }
 
+    /// Ignored files in the repo's original checkout that can be copied into a new workspace. Runs off the main thread.
+    func carryOverCandidates(_ r: Repo) async -> [CarryOver.Candidate] {
+        let co = CarryOver(git: service.git)
+        return await Task.detached { co.candidates(for: r) }.value
+    }
+
+    /// Forgets the repo's remembered carry-over paths.
+    func clearCarryOver(_ r: Repo) {
+        if state.setCarryOver(r.id, to: []) { save() }
+    }
+
     /// From the cache filled by `refreshRepoInfo()`; no disk access while drawing.
     func repoMissing(_ r: Repo) -> Bool { missingRepos.contains(r.id) }
 
@@ -323,7 +334,9 @@ final class AppModel: ObservableObject {
     // MARK: Workspaces
 
     /// Returns nil on success, or the error text to show in the sheet.
+    /// With `rememberCarryOver`, each repo's `carryOver` choice is saved on the repo for next time.
     func createWorkspace(name: String, branch: String, selections: [RepoSelection], baseSource: BaseSource = .local,
+                         rememberCarryOver: Bool = false,
                          progress: @escaping @Sendable (String) -> Void = { _ in }) async -> String? {
         let svc = service, names = state.workspaces.map(\.name)
         let (result, warnings): (Result<Workspace, Error>, [String]) = await Task.detached {
@@ -336,6 +349,9 @@ final class AppModel: ObservableObject {
         case .success(let ws):
             state.workspaces.append(ws)
             state.preferences.baseSource = baseSource
+            if rememberCarryOver {
+                for sel in selections { _ = state.setCarryOver(sel.repo.id, to: sel.carryOver) }
+            }
             save()
             if !warnings.isEmpty { creationWarnings[ws.id] = warnings }
             select(ws.id)

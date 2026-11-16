@@ -7,7 +7,7 @@ final class ProjectTests: XCTestCase {
         let rid = UUID().uuidString
         let json = #"{"schemaVersion":2,"repos":[{"id":"\#(rid)","name":"a","path":"/a","defaultBranch":"main"}],"workspaces":[]}"#
         let st = try JSONDecoder().decode(AppState.self, from: Data(json.utf8))
-        XCTAssertEqual(st.schemaVersion, 3)
+        XCTAssertEqual(st.schemaVersion, AppState.currentSchema)
         XCTAssertEqual(st.repos.count, 1)
         XCTAssertTrue(st.projects.isEmpty)
     }

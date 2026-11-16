@@ -3,6 +3,8 @@ import Foundation
 struct RepoSelection {
     var repo: Repo
     var base: String
+    /// Git-ignored paths to copy from the original checkout into the new worktree (see `CarryOver`).
+    var carryOver: [String] = []
 }
 
 struct DeleteWarning: Equatable {
@@ -35,7 +37,9 @@ struct WorkspaceService {
     /// An empty `branch` starts every repo detached at its base (default) branch, so no branch is claimed.
     /// Otherwise, if the branch already exists in a repo it is checked out as is; else it is created from the base.
     /// With `baseSource == .origin`, each repo that has an origin is fetched first and its base becomes
-    /// `origin/<base>` (see `resolveOriginBases`). Problems that don't stop creation are reported to `onWarning`.
+    /// `origin/<base>` (see `resolveOriginBases`). After each worktree is added, its `carryOver` paths are copied
+    /// from the original checkout; a failed copy never rolls back. Problems that don't stop creation are reported
+    /// to `onWarning`.
     func create(name: String, branch: String, selections: [RepoSelection], existingNames: [String],
                 baseSource: BaseSource = .local, onWarning: (String) -> Void = { _ in },
                 progress: (String) -> Void = { _ in }) throws -> Workspace {
@@ -95,6 +99,12 @@ struct WorkspaceService {
                     }
                 } catch {
                     throw GitError(command: "", output: "\(s.repo.name): \(error.localizedDescription)", status: 1)
+                }
+                if !s.carryOver.isEmpty {
+                    progress("Copying local files for \(s.repo.name)…")
+                    for w in CarryOver(git: git).copy(paths: s.carryOver, from: s.repo.path, to: path) {
+                        onWarning("\(s.repo.name): \(w)")
+                    }
                 }
                 let pre = plan == .existing
                 let owns = plan == .new || plan == .tracking

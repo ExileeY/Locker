@@ -42,6 +42,14 @@ extension AppState {
         return true
     }
 
+    /// Replaces the repo's remembered carry-over paths. False if the repo is missing or nothing changed.
+    @discardableResult
+    mutating func setCarryOver(_ repoID: UUID, to paths: [String]) -> Bool {
+        guard let i = repos.firstIndex(where: { $0.id == repoID }), repos[i].carryOver != paths else { return false }
+        repos[i].carryOver = paths
+        return true
+    }
+
     /// "New project", "New project 2", ... the first name no project uses (case-insensitive).
     func newProjectName() -> String {
         var name = "New project", n = 2
