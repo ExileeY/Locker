@@ -20,6 +20,13 @@ struct ComposerView: View {
     @State private var selectedProject: UUID?
     @State private var baseSource: BaseSource = .origin
     @State private var originHints: [UUID: WorkspaceService.OriginHint] = [:]
+    /// Ignored files each repo's original checkout has, loaded once per repo while the composer is open.
+    @State private var carryCandidates: [UUID: [CarryOver.Candidate]] = [:]
+    /// Ticked carry-over paths per repo; set to the preselected entries when a repo's list first loads.
+    @State private var carryPicked: [UUID: Set<String>] = [:]
+    /// Repos whose build-output entries are shown.
+    @State private var carryExpanded: Set<UUID> = []
+    @State private var rememberCarry = true
     /// Set by a Create click that failed validation; from then on issues are shown in red next to their fields.
     @State private var showIssues = false
     @FocusState private var nameFocused: Bool
@@ -220,6 +227,7 @@ struct ComposerView: View {
                     }
                     .task(id: HintKey(repos: chosenRepos.map(\.id), bases: chosenRepos.map(base(for:)))) { await refreshOriginHints() }
                 }
+                if chosenRepos.contains(where: { !(carryCandidates[$0.id] ?? []).isEmpty }) { carryOverSection }
             }
             .padding(.top, 8)
         } label: {
@@ -230,11 +238,93 @@ struct ComposerView: View {
             .contentShape(Rectangle())
             .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { showAdvanced.toggle() } }
         }
+        // On the group, not the list, so the summary's file count is ready while Advanced is collapsed.
+        .task(id: chosenRepos.map(\.id)) { await refreshCarryCandidates() }
     }
+
+    // MARK: Local files to copy
+
+    private var carryOverSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                label("Local files to copy")
+                Text("Ignored by git, so a new worktree doesn't have them. Ticked items are copied from each repo's original folder.")
+                    .font(.system(size: 11)).foregroundStyle(Theme.muted)
+            }
+            ForEach(chosenRepos.filter { !(carryCandidates[$0.id] ?? []).isEmpty }) { r in carryList(r) }
+            Toggle("Remember these choices for each repo", isOn: $rememberCarry)
+                .toggleStyle(.checkbox).font(.system(size: 12))
+                .accessibilityIdentifier("remember-carry-over")
+        }
+    }
+
+    private func carryList(_ r: Repo) -> some View {
+        let all = carryCandidates[r.id] ?? []
+        let picked = carryPicked[r.id] ?? []
+        let expanded = carryExpanded.contains(r.id)
+        let shown = all.filter { !$0.heavy || expanded || picked.contains($0.path) }
+        let hidden = all.count - shown.count
+        return VStack(alignment: .leading, spacing: 0) {
+            Text(r.name).font(.system(size: 12.5, weight: .medium)).padding(.horizontal, 10).padding(.vertical, 6)
+            ForEach(shown) { c in
+                Divider()
+                carryRow(r, c, on: picked.contains(c.path))
+            }
+            if hidden > 0 {
+                Divider()
+                Button("Show \(hidden) more (build output)") { carryExpanded.insert(r.id) }
+                    .buttonStyle(.plain).font(.system(size: 11.5)).foregroundStyle(Theme.chipFG)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+            }
+        }
+        .frame(maxWidth: 560, alignment: .leading)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
+    }
+
+    private func carryRow(_ r: Repo, _ c: CarryOver.Candidate, on: Bool) -> some View {
+        Button {
+            var set = carryPicked[r.id] ?? []
+            if on { set.remove(c.path) } else { set.insert(c.path) }
+            carryPicked[r.id] = set
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: on ? "checkmark.square.fill" : "square")
+                    .foregroundStyle(on ? Theme.accent : Theme.muted).font(.system(size: 13))
+                Text(c.path).font(Theme.mono(11.5)).lineLimit(1).truncationMode(.middle)
+                if let tag = carryTag(c) {
+                    Text(tag).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(c.heavy && c.source == .detected ? Theme.amber : Theme.muted)
+                }
+                Spacer(minLength: 8)
+                Text(Self.sizeText(c)).font(.system(size: 11)).foregroundStyle(Theme.muted).monospacedDigit()
+            }
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(c.path) in \(r.name)")
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func carryTag(_ c: CarryOver.Candidate) -> String? {
+        switch c.source {
+        case .remembered: return "remembered"
+        case .worktreeinclude: return CarryOver.includeFile
+        case .detected: return c.heavy ? "build output" : nil
+        }
+    }
+
+    static func sizeText(_ c: CarryOver.Candidate) -> String {
+        let s = ByteCountFormatter.string(fromByteCount: c.size, countStyle: .file)
+        return c.sizeCapped ? s + "+" : s
+    }
+
+    /// Ticked carry-over paths across the chosen repos.
+    private var carryCount: Int { chosenRepos.reduce(0) { $0 + (carryPicked[$1.id]?.count ?? 0) } }
 
     private var advancedSummary: String {
         let from = baseSource == .origin ? "from origin" : "from local"
-        return (branch.isEmpty ? "no branch, detached at each repo's default" : "branch \(branch)") + " · " + from
+        let files = carryCount == 0 ? "" : " · \(carryCount) local \(carryCount == 1 ? "file" : "files")"
+        return (branch.isEmpty ? "no branch, detached at each repo's default" : "branch \(branch)") + " · " + from + files
     }
 
     private func base(for r: Repo) -> String {
@@ -346,6 +436,18 @@ struct ComposerView: View {
         if !Task.isCancelled { originHints = result }
     }
 
+    /// Loads the carry-over list of each chosen repo not loaded yet, one repo at a time so lists appear as they're ready.
+    func refreshCarryCandidates() async {
+        try? await Task.sleep(nanoseconds: 250_000_000)   // debounce clicking through repos
+        for r in chosenRepos.filter(usable) where carryCandidates[r.id] == nil {
+            if Task.isCancelled { return }
+            let list = await model.carryOverCandidates(r)
+            if Task.isCancelled { return }
+            carryCandidates[r.id] = list
+            if carryPicked[r.id] == nil { carryPicked[r.id] = Set(list.filter(\.preselected).map(\.path)) }
+        }
+    }
+
     func refreshBranchStates() async {
         try? await Task.sleep(nanoseconds: 250_000_000)   // debounce typing
         if Task.isCancelled { return }
@@ -384,13 +486,15 @@ struct ComposerView: View {
             }
             return
         }
+        // A repo whose list hasn't loaded yet copies what it remembered.
         let sel = chosenRepos.map {
-            RepoSelection(repo: $0, base: (bases[$0.id] ?? $0.defaultBranch).trimmingCharacters(in: .whitespaces))
+            RepoSelection(repo: $0, base: (bases[$0.id] ?? $0.defaultBranch).trimmingCharacters(in: .whitespaces),
+                          carryOver: carryPicked[$0.id].map { $0.sorted() } ?? $0.carryOver)
         }
         busy = true; error = nil; progress = "Starting…"
         Task {
             let failure = await model.createWorkspace(name: name.trimmingCharacters(in: .whitespaces), branch: branch, selections: sel,
-                                                      baseSource: baseSource, progress: { msg in Task { @MainActor in progress = msg } })
+                                                      baseSource: baseSource, rememberCarryOver: rememberCarry, progress: { msg in Task { @MainActor in progress = msg } })
             busy = false
             if let failure { error = failure } else { showIssues = false }   // success: createWorkspace selects the new workspace and leaves this page
         }

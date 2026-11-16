@@ -5,6 +5,22 @@ struct Repo: Codable, Identifiable, Hashable {
     var name: String
     var path: String
     var defaultBranch: String
+    /// Git-ignored paths (relative to `path`, folders end in "/") last chosen to copy into new workspaces.
+    var carryOver: [String] = []
+
+    init(id: UUID = UUID(), name: String, path: String, defaultBranch: String, carryOver: [String] = []) {
+        self.id = id; self.name = name; self.path = path; self.defaultBranch = defaultBranch; self.carryOver = carryOver
+    }
+
+    /// Lenient for `carryOver` only (added in schema 4): a bad value there must not drop the repo.
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        path = try c.decode(String.self, forKey: .path)
+        defaultBranch = try c.decode(String.self, forKey: .defaultBranch)
+        carryOver = (try? c.decodeIfPresent([String].self, forKey: .carryOver)) ?? []
+    }
 }
 
 /// A named group of repos. Only a selection shortcut: workspaces do not remember the project they were created from.
@@ -115,7 +131,7 @@ struct Preferences: Codable, Equatable {
 }
 
 struct AppState: Codable {
-    static let currentSchema = 3
+    static let currentSchema = 4
     var schemaVersion = AppState.currentSchema
     var repos: [Repo] = []
     var projects: [Project] = []
@@ -130,7 +146,7 @@ struct AppState: Codable {
     }
 
     /// Schema 1 workspaces had one mandatory branch per workspace. Migrate it to per-repo ownership.
-    /// Schema 3 added projects; older files simply have none.
+    /// Schema 3 added projects; older files simply have none. Schema 4 added `Repo.carryOver` (empty when absent).
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         let v = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
