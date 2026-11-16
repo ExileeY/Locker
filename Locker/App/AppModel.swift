@@ -36,6 +36,10 @@ final class AppModel: ObservableObject {
     /// Views read these instead of running git or touching the disk while they draw.
     @Published private(set) var branchCache: [UUID: [String]] = [:]
     @Published private(set) var missingRepos: Set<UUID> = []
+    /// Carry-over trees per repo id, kept across composer sessions. Not published: the composer draws its own copy.
+    private var carryCache: [UUID: CarryCacheEntry] = [:]
+    struct CarryCacheEntry { var tree: CarryTree; var stamp: CarryOver.Stamp; var loaded: Date }
+    static let carryCacheTTL: TimeInterval = 300
     /// Open "Settings" interval, ended once the page has appeared.
     var settingsSignpost: OSSignpostIntervalState?
     private var toastTask: Task<Void, Never>?
@@ -268,10 +272,44 @@ final class AppModel: ObservableObject {
         if state.setDefaultBranch(r.id, to: branch) { save() }
     }
 
-    /// Ignored files in the repo's original checkout that can be copied into a new workspace. Runs off the main thread.
-    func carryOverCandidates(_ r: Repo) async -> [CarryOver.Candidate] {
+    // MARK: Carry-over (ignored files copied into new workspaces)
+
+    /// The cached carry-over tree of `r`, and whether it is still current: the ignore files and remembered paths are
+    /// unchanged and it is younger than `carryCacheTTL`. A stale tree is still worth showing while a fresh one loads.
+    func cachedCarryTree(_ r: Repo) -> (tree: CarryTree, fresh: Bool)? {
+        guard let c = carryCache[r.id] else { return nil }
+        return (c.tree, c.stamp == CarryOver.stamp(for: r) && Date().timeIntervalSince(c.loaded) < Self.carryCacheTTL)
+    }
+
+    /// Lists the ignored entries of `r`'s original checkout (git only, folders unsized) and caches the tree.
+    /// Folder totals `old` already knows are kept.
+    func loadCarryTree(_ r: Repo, keepingSizesFrom old: CarryTree?) async -> CarryTree {
         let co = CarryOver(git: service.git)
-        return await Task.detached { co.candidates(for: r) }.value
+        let stamp = CarryOver.stamp(for: r)
+        let list = await Self.offMain { co.candidates(for: r) }
+        var tree = CarryTree(candidates: list)
+        if let old { tree.adoptSizes(from: old) }
+        carryCache[r.id] = CarryCacheEntry(tree: tree, stamp: stamp, loaded: Date())
+        return tree
+    }
+
+    /// Stores what the composer learned since (folder contents, sizes) so the next composer starts with it.
+    func updateCarryCache(_ id: UUID, _ tree: CarryTree) {
+        carryCache[id]?.tree = tree
+    }
+
+    /// One level of an ignored folder in `r`'s original checkout; nil when it can't be read.
+    func carryChildren(_ r: Repo, _ folder: String) async -> [CarryOver.Entry]? {
+        let root = r.path
+        return await Self.offMain { CarryOver.entries(in: folder, root: root) }
+    }
+
+    /// Runs `work` on the shared pool as a child task, so cancelling the caller cancels it too (unlike `Task.detached`).
+    nonisolated static func offMain<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        await withTaskGroup(of: T.self) { g in
+            g.addTask(operation: work)
+            return await g.next()!
+        }
     }
 
     /// Forgets the repo's remembered carry-over paths.
