@@ -1,0 +1,41 @@
+Locker/App/AppModel.swift
+  s_10d6dc9218faa6::t_45aa0a2f75b743 271-281,337,339,352-354
+Locker/Services/CarryOver.swift
+  s_10d6dc9218faa6::t_a5216466e14a4b 1-181
+Locker/Services/GitClient.swift
+  s_10d6dc9218faa6::t_4d786134f92b63 143-154
+Locker/Services/WorkspaceService.swift
+  s_10d6dc9218faa6::t_36e4a3272ebc33 6-7,40-42,103-108
+Locker/Views/ComposerView.swift
+  s_10d6dc9218faa6::t_cab97419a131c4 23-29,230,241-242,245-323,326-327,439-450,489,491-492,497
+Locker/Views/SettingsView.swift
+  s_10d6dc9218faa6::t_5281be08449a07 271,281-303
+LockerTests/CarryOverTests.swift
+  s_10d6dc9218faa6::t_7df15191981f26 1-189
+LockerTests/ProjectTests.swift
+  s_10d6dc9218faa6::t_d3b99d9232e896 10
+LockerTests/WorkspaceServiceTests.swift
+  s_10d6dc9218faa6::t_91c3a562c774bb 240
+README.md
+  s_10d6dc9218faa6::t_d79559c108f0d0 17-19
+Locker/Models/Models.swift
+  s_10d6dc9218faa6::t_e77d83d31d0ca3 8-23,134,149
+Locker/Models/RepoProjectOps.swift
+  s_10d6dc9218faa6::t_ad40ee41655c16 45-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1f71f47cb8f600a3e63a9989073a5783d7758915",
+  "prompts": {},
+  "sessions": {
+    "s_10d6dc9218faa6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7fed1594-c592-455b-86d5-fe0a2b4c09a1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
