@@ -97,12 +97,30 @@ struct Workspace: Codable, Identifiable, Hashable {
     }
 }
 
+/// Where a new workspace's repos start: the local branch as it is, or `origin/<branch>` after a fetch.
+enum BaseSource: String, Codable, CaseIterable {
+    case origin, local
+}
+
+/// User choices Locker remembers between sessions. Every field is optional on disk so older files still load.
+struct Preferences: Codable, Equatable {
+    var baseSource: BaseSource = .origin
+
+    init() {}
+
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        baseSource = (try? c.decodeIfPresent(BaseSource.self, forKey: .baseSource)) ?? .origin
+    }
+}
+
 struct AppState: Codable {
     static let currentSchema = 3
     var schemaVersion = AppState.currentSchema
     var repos: [Repo] = []
     var projects: [Project] = []
     var workspaces: [Workspace] = []
+    var preferences = Preferences()
 
     init() {}
 
@@ -119,6 +137,7 @@ struct AppState: Codable {
         repos = try c.decodeIfPresent([Repo].self, forKey: .repos) ?? []
         workspaces = try c.decodeIfPresent([Workspace].self, forKey: .workspaces) ?? []
         projects = (try? c.decodeIfPresent([Project].self, forKey: .projects)) ?? []
+        preferences = (try? c.decodeIfPresent(Preferences.self, forKey: .preferences)) ?? Preferences()
         if v < 2 {
             for i in workspaces.indices {
                 guard let b = workspaces[i].branch else { continue }

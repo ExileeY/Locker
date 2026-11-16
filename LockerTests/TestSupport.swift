@@ -20,4 +20,14 @@ enum TestSupport {
         try! g.run(["commit", "-q", "-m", "init"], in: path)
         return Repo(name: name, path: path, defaultBranch: "main")
     }
+
+    /// Clones `upstream` so the result has an `origin` remote with `origin/main`.
+    static func makeClone(of upstream: Repo, named name: String, in parent: String) -> Repo {
+        let path = parent + "/" + name
+        let g = GitClient()
+        try! g.run(["clone", "-q", upstream.path, path], in: parent)
+        try! g.run(["config", "user.email", "t@t.t"], in: path)
+        try! g.run(["config", "user.name", "t"], in: path)
+        return Repo(name: name, path: path, defaultBranch: "main")
+    }
 }

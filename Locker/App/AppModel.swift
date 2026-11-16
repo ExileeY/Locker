@@ -30,6 +30,8 @@ final class AppModel: ObservableObject {
     @Published var gitMissing = false
     @Published var sessionsVersion = 0
     @Published var toast: ToastMessage?
+    /// Non-fatal problems from creating a workspace (e.g. a failed fetch), shown on it until dismissed. Not persisted.
+    @Published var creationWarnings: [UUID: [String]] = [:]
     /// Branch lists and missing-folder flags per repo id, loaded off the main thread by `refreshRepoInfo()`.
     /// Views read these instead of running git or touching the disk while they draw.
     @Published private(set) var branchCache: [UUID: [String]] = [:]
@@ -321,16 +323,21 @@ final class AppModel: ObservableObject {
     // MARK: Workspaces
 
     /// Returns nil on success, or the error text to show in the sheet.
-    func createWorkspace(name: String, branch: String, selections: [RepoSelection],
+    func createWorkspace(name: String, branch: String, selections: [RepoSelection], baseSource: BaseSource = .local,
                          progress: @escaping @Sendable (String) -> Void = { _ in }) async -> String? {
         let svc = service, names = state.workspaces.map(\.name)
-        let result: Result<Workspace, Error> = await Task.detached {
-            Result { try svc.create(name: name, branch: branch, selections: selections, existingNames: names, progress: progress) }
+        let (result, warnings): (Result<Workspace, Error>, [String]) = await Task.detached {
+            var warnings: [String] = []
+            let r = Result { try svc.create(name: name, branch: branch, selections: selections, existingNames: names,
+                                            baseSource: baseSource, onWarning: { warnings.append($0) }, progress: progress) }
+            return (r, warnings)
         }.value
         switch result {
         case .success(let ws):
             state.workspaces.append(ws)
+            state.preferences.baseSource = baseSource
             save()
+            if !warnings.isEmpty { creationWarnings[ws.id] = warnings }
             select(ws.id)
             return nil
         case .failure(let e):

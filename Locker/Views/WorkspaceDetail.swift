@@ -16,6 +16,13 @@ struct WorkspaceDetail: View {
                 .font(.system(size: 12)).padding(.horizontal, 20).padding(.vertical, 8)
                 .background(Theme.amberBG)
             }
+            if let warnings = model.creationWarnings[ws.id] {
+                Banner(kind: .warning, message: warnings.joined(separator: "\n"), actionTitle: "Dismiss") {
+                    model.creationWarnings[ws.id] = nil
+                }
+                .padding(.horizontal, 20).padding(.vertical, 8)
+                .accessibilityIdentifier("creation-warnings")
+            }
             TerminalArea(ws: ws)
         }
     }

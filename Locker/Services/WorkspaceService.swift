@@ -34,7 +34,10 @@ struct WorkspaceService {
     /// Creates the workspace directory and one worktree per repo. Rolls back on any failure.
     /// An empty `branch` starts every repo detached at its base (default) branch, so no branch is claimed.
     /// Otherwise, if the branch already exists in a repo it is checked out as is; else it is created from the base.
+    /// With `baseSource == .origin`, each repo that has an origin is fetched first and its base becomes
+    /// `origin/<base>` (see `resolveOriginBases`). Problems that don't stop creation are reported to `onWarning`.
     func create(name: String, branch: String, selections: [RepoSelection], existingNames: [String],
+                baseSource: BaseSource = .local, onWarning: (String) -> Void = { _ in },
                 progress: (String) -> Void = { _ in }) throws -> Workspace {
         guard !selections.isEmpty else { throw GitError(command: "", output: "Select at least one repository.", status: 1) }
         let detached = branch.isEmpty
@@ -45,6 +48,9 @@ struct WorkspaceService {
         if FileManager.default.fileExists(atPath: root) || existingNames.contains(name) {
             throw GitError(command: "", output: "A workspace folder named “\(Self.slug(name))” already exists.", status: 1)
         }
+        let selections = baseSource == .origin
+            ? try resolveOriginBases(selections, onWarning: onWarning, progress: progress)
+            : selections
         // Preflight: decide per repo whether to attach an existing branch or create a new one.
         enum Plan { case new, existing, tracking, detached }
         var plans: [Plan] = []
@@ -82,7 +88,7 @@ struct WorkspaceService {
                 progress("Creating worktree for \(s.repo.name)…")
                 do {
                     switch plan {
-                    case .new: try git.worktreeAdd(repo: s.repo.path, path: path, branch: branch, base: s.base)
+                    case .new: try git.worktreeAdd(repo: s.repo.path, path: path, branch: branch, base: s.base, noTrack: true)
                     case .existing: try git.worktreeAddExisting(repo: s.repo.path, path: path, branch: branch)
                     case .tracking: try git.worktreeAddTracking(repo: s.repo.path, path: path, branch: branch)
                     case .detached: try git.worktreeAddDetached(repo: s.repo.path, path: path, base: s.base)
@@ -114,6 +120,72 @@ struct WorkspaceService {
         let terms = links.map { TerminalSpec(title: $0.repoName, cwd: $0.worktreePath, repoLabel: $0.repoName) }
         return Workspace(name: name, branch: detached ? nil : branch, repos: links, terminals: terms,
                          activeTerminal: terms.first?.id, root: root)
+    }
+
+    /// Fetches every selected repo that has an origin (in parallel, each with a timeout), then points each base
+    /// at `origin/<base>`:
+    /// - fetched, and `origin/<base>` exists: use it.
+    /// - fetch failed, but an earlier fetch left `origin/<base>`: use that and warn that it may be stale.
+    /// - fetch failed, and `<base>` is a branch with no `origin/<base>` at all: throw, nothing has been created yet.
+    /// - fetched, but `<base>` is a local-only branch: keep the local branch and warn.
+    /// - no origin remote, or `<base>` is a tag or commit: keep it as is.
+    func resolveOriginBases(_ selections: [RepoSelection], onWarning: (String) -> Void = { _ in },
+                            progress: (String) -> Void = { _ in }) throws -> [RepoSelection] {
+        let git = self.git
+        let withOrigin = selections.map { git.hasOrigin($0.repo.path) }
+        if withOrigin.contains(true) {
+            progress("Fetching from origin…")
+        }
+        let failures = FetchFailures()
+        DispatchQueue.concurrentPerform(iterations: selections.count) { i in
+            guard withOrigin[i] else { return }
+            do { try git.fetchOrigin(in: selections[i].repo.path) }
+            catch { failures.set(i, Self.firstLine(error.localizedDescription)) }
+        }
+        var out = selections
+        for (i, s) in selections.enumerated() where withOrigin[i] {
+            let base = s.base.trimmingCharacters(in: .whitespaces)
+            guard !base.isEmpty else { continue }
+            let name = base.hasPrefix("origin/") ? String(base.dropFirst(7)) : base
+            let fetchError = failures.get(i)
+            if git.remoteBranchExists(name, in: s.repo.path) {
+                out[i].base = "origin/" + name
+                if let fetchError {
+                    onWarning("\(s.repo.name): couldn't fetch from origin (\(fetchError)). Started from the last fetched origin/\(name), which may be out of date.")
+                }
+            } else if let fetchError, base != name || git.branchExists(name, in: s.repo.path) {
+                throw GitError(command: "", output: "\(s.repo.name): couldn't fetch from origin (\(fetchError)), and origin/\(name) has never been fetched. Try again, or start from the local branch.", status: 1)
+            } else if git.branchExists(name, in: s.repo.path) {
+                onWarning("\(s.repo.name): “\(name)” isn't on origin. Started from the local branch.")
+            }
+        }
+        return out
+    }
+
+    private static func firstLine(_ s: String) -> String {
+        s.split(separator: "\n").first.map(String.init) ?? s
+    }
+
+    private final class FetchFailures: @unchecked Sendable {
+        private let lock = NSLock()
+        private var errors: [Int: String] = [:]
+        func set(_ i: Int, _ e: String) { lock.lock(); errors[i] = e; lock.unlock() }
+        func get(_ i: Int) -> String? { lock.lock(); defer { lock.unlock() }; return errors[i] }
+    }
+
+    /// What the composer shows next to a repo's base: how local `<base>` compares with `origin/<base>`,
+    /// from refs already on disk (no network).
+    enum OriginHint: Equatable {
+        case noOrigin, notOnOrigin, onlyOnOrigin, upToDate
+        case diverged(ahead: Int, behind: Int)
+    }
+
+    func originHint(base: String, in repo: Repo) -> OriginHint {
+        guard git.hasOrigin(repo.path) else { return .noOrigin }
+        let name = base.hasPrefix("origin/") ? String(base.dropFirst(7)) : base
+        guard git.remoteBranchExists(name, in: repo.path) else { return .notOnOrigin }
+        guard let c = git.aheadBehindOrigin(name, in: repo.path) else { return .onlyOnOrigin }
+        return c.ahead == 0 && c.behind == 0 ? .upToDate : .diverged(ahead: c.ahead, behind: c.behind)
     }
 
     /// Renames a workspace. Only the display name changes: the folder, worktrees and branches stay where they are,
