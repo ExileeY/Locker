@@ -18,6 +18,8 @@ struct ComposerView: View {
     @State private var progress = ""
     @State private var branchStates: [UUID: BranchState] = [:]
     @State private var selectedProject: UUID?
+    @State private var baseSource: BaseSource = .origin
+    @State private var originHints: [UUID: WorkspaceService.OriginHint] = [:]
     /// Set by a Create click that failed validation; from then on issues are shown in red next to their fields.
     @State private var showIssues = false
     @FocusState private var nameFocused: Bool
@@ -50,7 +52,7 @@ struct ComposerView: View {
             footer
         }
         .background(Theme.surface)
-        .onAppear { nameFocused = true }
+        .onAppear { nameFocused = true; baseSource = model.state.preferences.baseSource }
         .onChange(of: chosen) { _, _ in error = nil }
     }
 
@@ -197,12 +199,26 @@ struct ComposerView: View {
                         .onChange(of: branch) { _, _ in error = nil }
                         .task(id: BranchKey(branch: branch, repos: visible.map(\.id))) { await refreshBranchStates() }
                 }
+                VStack(alignment: .leading, spacing: 4) {
+                    label("Start from")
+                    Picker("Start from", selection: $baseSource) {
+                        Text("Origin (fetch first)").tag(BaseSource.origin)
+                        Text("Local branch").tag(BaseSource.local)
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .accessibilityIdentifier("base-source")
+                    Text(baseSource == .origin
+                         ? "Fetches each repo, then starts from origin/<base>. Repos without an origin use the local branch."
+                         : "Starts from each repo's local branch as it is now, without fetching.")
+                        .font(.system(size: 11)).foregroundStyle(Theme.muted)
+                }
                 if case .missingBase? = shownIssue, let shownIssue { issueText(shownIssue) }
                 if !chosenRepos.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         label(branch.isEmpty ? "Start each repo detached at" : "Base for repos where the branch is new")
                         ForEach(chosenRepos) { r in baseRow(r) }
                     }
+                    .task(id: HintKey(repos: chosenRepos.map(\.id), bases: chosenRepos.map(base(for:)))) { await refreshOriginHints() }
                 }
             }
             .padding(.top, 8)
@@ -217,7 +233,40 @@ struct ComposerView: View {
     }
 
     private var advancedSummary: String {
-        branch.isEmpty ? "no branch, detached at each repo's default" : "branch \(branch)"
+        let from = baseSource == .origin ? "from origin" : "from local"
+        return (branch.isEmpty ? "no branch, detached at each repo's default" : "branch \(branch)") + " · " + from
+    }
+
+    private func base(for r: Repo) -> String {
+        (bases[r.id] ?? r.defaultBranch).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// The hint next to a base field: how the local branch compares with origin, from refs on disk.
+    @ViewBuilder private func originHintText(_ r: Repo) -> some View {
+        switch originHints[r.id] {
+        case .noOrigin?:
+            hint("no origin, uses local", Theme.muted)
+        case .notOnOrigin?:
+            hint(baseSource == .origin ? "not on origin, uses local" : "not on origin", Theme.muted)
+        case .onlyOnOrigin?:
+            hint("only on origin", Theme.muted)
+        case .upToDate?:
+            hint("up to date with origin", Theme.green)
+        case .diverged(let ahead, let behind)?:
+            let parts = [behind > 0 ? "\(behind) behind" : nil, ahead > 0 ? "\(ahead) ahead of" : nil].compactMap { $0 }
+            // Amber when the chosen source leaves something out: stale local, or local commits origin lacks.
+            let lossy = (baseSource == .local && behind > 0) || (baseSource == .origin && ahead > 0)
+            hint("local is " + parts.joined(separator: ", ") + " origin", lossy ? Theme.amber : Theme.muted)
+                .help(ahead > 0 && baseSource == .origin
+                      ? "Local commits not on origin won't be in this workspace. Choose Local branch to include them."
+                      : "Based on the last fetch.")
+        case nil:
+            EmptyView()
+        }
+    }
+
+    private func hint(_ s: String, _ color: Color) -> some View {
+        Text(s).font(.system(size: 11, weight: .semibold)).foregroundStyle(color).lineLimit(1)
     }
 
     private func baseRow(_ r: Repo) -> some View {
@@ -233,6 +282,7 @@ struct ComposerView: View {
                 TextField(r.defaultBranch, text: Binding(get: { bases[r.id] ?? r.defaultBranch }, set: { bases[r.id] = $0; error = nil }))
                     .font(Theme.mono(11.5)).frame(width: 160).textFieldStyle(.roundedBorder)
                     .accessibilityLabel("Base branch for \(r.name)")
+                originHintText(r)
             }
             Spacer()
         }
@@ -281,6 +331,20 @@ struct ComposerView: View {
     // MARK: Logic (unchanged from the old sheet)
 
     struct BranchKey: Equatable { var branch: String; var repos: [UUID] }
+    struct HintKey: Equatable { var repos: [UUID]; var bases: [String] }
+
+    func refreshOriginHints() async {
+        try? await Task.sleep(nanoseconds: 250_000_000)   // debounce typing
+        if Task.isCancelled { return }
+        let svc = model.service
+        let list = chosenRepos.filter(usable).map { ($0, base(for: $0)) }
+        let result: [UUID: WorkspaceService.OriginHint] = await Task.detached {
+            var out: [UUID: WorkspaceService.OriginHint] = [:]
+            for (r, b) in list where !b.isEmpty { out[r.id] = svc.originHint(base: b, in: r) }
+            return out
+        }.value
+        if !Task.isCancelled { originHints = result }
+    }
 
     func refreshBranchStates() async {
         try? await Task.sleep(nanoseconds: 250_000_000)   // debounce typing
@@ -326,7 +390,7 @@ struct ComposerView: View {
         busy = true; error = nil; progress = "Starting…"
         Task {
             let failure = await model.createWorkspace(name: name.trimmingCharacters(in: .whitespaces), branch: branch, selections: sel,
-                                                      progress: { msg in Task { @MainActor in progress = msg } })
+                                                      baseSource: baseSource, progress: { msg in Task { @MainActor in progress = msg } })
             busy = false
             if let failure { error = failure } else { showIssues = false }   // success: createWorkspace selects the new workspace and leaves this page
         }

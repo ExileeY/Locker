@@ -20,8 +20,10 @@ struct GitStatus: Equatable {
 struct GitClient {
     var gitPath = "/usr/bin/git"
 
+    /// Runs git and returns its combined output. With a `timeout` (seconds) the process is terminated when it
+    /// runs longer, and a `GitError` saying so is thrown. Use it for network commands that could hang.
     @discardableResult
-    func run(_ args: [String], in dir: String) throws -> String {
+    func run(_ args: [String], in dir: String, timeout: TimeInterval? = nil) throws -> String {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: gitPath)
         p.arguments = args
@@ -33,14 +35,43 @@ struct GitClient {
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = pipe
-        try p.run()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        let out = String(decoding: data, as: UTF8.self)
-        guard p.terminationStatus == 0 else {
-            throw GitError(command: args.joined(separator: " "), output: out, status: p.terminationStatus)
+        guard let timeout else {
+            try p.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            p.waitUntilExit()
+            return try finish(args, p.terminationStatus, data)
         }
+        // Read on another thread so the wait below can give up. A helper git spawned (ssh) may keep the pipe
+        // open after git is terminated, so the read is abandoned after a short grace period instead of joined.
+        let exited = DispatchSemaphore(value: 0), drained = DispatchSemaphore(value: 0)
+        let box = OutputBox()
+        p.terminationHandler = { _ in exited.signal() }
+        try p.run()
+        DispatchQueue.global(qos: .userInitiated).async {
+            box.set(pipe.fileHandleForReading.readDataToEndOfFile())
+            drained.signal()
+        }
+        if exited.wait(timeout: .now() + timeout) == .timedOut {
+            p.terminate()
+            _ = exited.wait(timeout: .now() + 2)
+            throw GitError(command: args.joined(separator: " "),
+                           output: "git \(args.first ?? "") timed out after \(Int(timeout)) s.", status: -1)
+        }
+        _ = drained.wait(timeout: .now() + 2)
+        return try finish(args, p.terminationStatus, box.get())
+    }
+
+    private func finish(_ args: [String], _ status: Int32, _ data: Data) throws -> String {
+        let out = String(decoding: data, as: UTF8.self)
+        guard status == 0 else { throw GitError(command: args.joined(separator: " "), output: out, status: status) }
         return out
+    }
+
+    private final class OutputBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data = Data()
+        func set(_ d: Data) { lock.lock(); data = d; lock.unlock() }
+        func get() -> Data { lock.lock(); defer { lock.unlock() }; return data }
     }
 
     var isInstalled: Bool { FileManager.default.isExecutableFile(atPath: gitPath) }
@@ -72,8 +103,9 @@ struct GitClient {
     }
 
     /// Creates a new branch `branch` from `base` in a new worktree at `path`.
-    func worktreeAdd(repo: String, path: String, branch: String, base: String) throws {
-        try run(["worktree", "add", "-b", branch, path, base], in: repo)
+    /// `noTrack` stops git from making `base` the upstream when it is a remote-tracking ref like `origin/main`.
+    func worktreeAdd(repo: String, path: String, branch: String, base: String, noTrack: Bool = false) throws {
+        try run(["worktree", "add"] + (noTrack ? ["--no-track"] : []) + ["-b", branch, path, base], in: repo)
     }
 
     /// Checks out an existing local branch into a new worktree at `path`.
@@ -97,6 +129,24 @@ struct GitClient {
 
     func remoteBranchExists(_ branch: String, in dir: String) -> Bool {
         (try? run(["rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(branch)"], in: dir)) != nil
+    }
+
+    func hasOrigin(_ dir: String) -> Bool {
+        ((try? run(["remote"], in: dir)) ?? "").split(separator: "\n").contains("origin")
+    }
+
+    /// Updates every `origin/*` remote-tracking ref. Never touches local branches or the working tree.
+    func fetchOrigin(in dir: String, timeout: TimeInterval = 30) throws {
+        try run(["fetch", "--no-tags", "origin"], in: dir, timeout: timeout)
+    }
+
+    /// Commits local `branch` has that `origin/<branch>` lacks, and the reverse, from refs already on disk.
+    /// Nil when either side doesn't exist.
+    func aheadBehindOrigin(_ branch: String, in dir: String) -> (ahead: Int, behind: Int)? {
+        guard let out = try? run(["rev-list", "--left-right", "--count", "refs/heads/\(branch)...refs/remotes/origin/\(branch)"], in: dir)
+        else { return nil }
+        let n = out.split(whereSeparator: { $0 == "\t" || $0 == " " || $0 == "\n" }).compactMap { Int($0) }
+        return n.count == 2 ? (n[0], n[1]) : nil
     }
 
     /// Maps branch name -> worktree path for every worktree (including the main one) that has a branch checked out.
