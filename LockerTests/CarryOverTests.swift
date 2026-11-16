@@ -45,7 +45,9 @@ final class CarryOverTests: XCTestCase {
         XCTAssertTrue(byPath["build/"]!.heavy)
         XCTAssertFalse(byPath[".env.local"]!.heavy)
         XCTAssertTrue(c.allSatisfy { !$0.preselected }, "nothing is preselected without a memory or .worktreeinclude")
-        XCTAssertEqual(byPath["secrets/"]!.size, 2)
+        XCTAssertNil(byPath["secrets/"]!.size, "folders are sized later, not while listing")
+        XCTAssertEqual(byPath[".env.local"]!.size, 7, "files get their size from one lstat")
+        XCTAssertEqual(try CarryOver.size(of: repo.path + "/secrets").0, 2)
         XCTAssertEqual(paths(c).suffix(2).sorted(), ["build/", "node_modules/"], "heavy entries are listed last")
     }
 
@@ -73,12 +75,55 @@ final class CarryOverTests: XCTestCase {
         XCTAssertFalse(paths(co.candidates(for: repo)).contains(".DS_Store"))
     }
 
-    func testSizeScanStopsAtFileCap() {
+    func testSizeScanStopsAtFileCap() throws {
         let big = dir + "/big"
-        try! fm.createDirectory(atPath: big, withIntermediateDirectories: true)
+        try fm.createDirectory(atPath: big, withIntermediateDirectories: true)
         for i in 0..<5 { write("f\(i)", "12345", in: big) }
-        XCTAssertEqual(CarryOver.size(of: big).0, 25)
-        XCTAssertFalse(CarryOver.size(of: big).capped)
+        XCTAssertEqual(try CarryOver.size(of: big).0, 25)
+        XCTAssertFalse(try CarryOver.size(of: big).capped)
+        let capped = try CarryOver.size(of: big, fileCap: 3)
+        XCTAssertTrue(capped.capped)
+        XCTAssertEqual(capped.0, 15)
+    }
+
+    func testSizeScanStopsWhenCancelled() async {
+        let big = dir + "/big"
+        for i in 0..<3 { write("f\(i)", "x", in: big) }
+        let t = Task { () throws -> Int64 in
+            while !Task.isCancelled { await Task.yield() }
+            return try CarryOver.size(of: big).0
+        }
+        t.cancel()
+        do { _ = try await t.value; XCTFail("a cancelled scan throws") } catch { XCTAssertTrue(error is CancellationError) }
+    }
+
+    func testEntriesListOneLevelWithoutFollowingSymlinks() throws {
+        write("secrets/sub/c.txt", "ccc")
+        write("secrets/.DS_Store", "x")
+        try fm.createSymbolicLink(atPath: repo.path + "/secrets/link", withDestinationPath: "sub")
+        let e = try XCTUnwrap(CarryOver.entries(in: "secrets/", root: repo.path))
+        let byPath = Dictionary(uniqueKeysWithValues: e.map { ($0.path, $0) })
+        XCTAssertEqual(Set(byPath.keys), ["secrets/a.txt", "secrets/b.txt", "secrets/sub/", "secrets/link"])
+        XCTAssertEqual(byPath["secrets/a.txt"]?.size, 1)
+        XCTAssertTrue(byPath["secrets/sub/"]!.isDir)
+        XCTAssertFalse(byPath["secrets/link"]!.isDir, "a symlinked folder is a leaf")
+        XCTAssertNil(CarryOver.entries(in: "missing/", root: repo.path))
+    }
+
+    func testAncestors() {
+        XCTAssertEqual(CarryOver.ancestors(of: "a/b/c.txt"), ["a/", "a/b/"])
+        XCTAssertEqual(CarryOver.ancestors(of: "a/b/"), ["a/"])
+        XCTAssertEqual(CarryOver.ancestors(of: ".env"), [])
+    }
+
+    func testStampChangesWithIgnoreRulesAndMemory() throws {
+        let before = CarryOver.stamp(for: repo)
+        XCTAssertEqual(CarryOver.stamp(for: repo), before)
+        var r = repo!
+        r.carryOver = [".env.local"]
+        XCTAssertNotEqual(CarryOver.stamp(for: r), before, "remembering choices invalidates the cached list")
+        write(".worktreeinclude", ".mcp.json\n")
+        XCTAssertNotEqual(CarryOver.stamp(for: repo), before)
     }
 
     // MARK: Copy

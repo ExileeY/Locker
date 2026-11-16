@@ -20,12 +20,19 @@ struct ComposerView: View {
     @State private var selectedProject: UUID?
     @State private var baseSource: BaseSource = .origin
     @State private var originHints: [UUID: WorkspaceService.OriginHint] = [:]
-    /// Ignored files each repo's original checkout has, loaded once per repo while the composer is open.
-    @State private var carryCandidates: [UUID: [CarryOver.Candidate]] = [:]
+    /// Ignored files each repo's original checkout has, as a lazily loaded tree (from `AppModel`'s cache when it has one).
+    @State private var carryTrees: [UUID: CarryTree] = [:]
     /// Ticked carry-over paths per repo; set to the preselected entries when a repo's list first loads.
     @State private var carryPicked: [UUID: Set<String>] = [:]
-    /// Repos whose build-output entries are shown.
-    @State private var carryExpanded: Set<UUID> = []
+    /// Expanded folders and groups per repo.
+    @State private var carryOpen: [UUID: Set<String>] = [:]
+    /// Repos whose list is shown rather than only its summary line.
+    @State private var carryRepoOpen: Set<UUID> = []
+    @State private var carryFilter: [UUID: String] = [:]
+    /// Folder listings in flight, as "<repo id>/<path>".
+    @State private var carryLoading: Set<String> = []
+    /// The running folder-size pass per repo; `id` tells a pass that was replaced from the current one.
+    @State private var carrySizers: [UUID: CarrySizer] = [:]
     @State private var rememberCarry = true
     /// Set by a Create click that failed validation; from then on issues are shown in red next to their fields.
     @State private var showIssues = false
@@ -60,6 +67,7 @@ struct ComposerView: View {
         }
         .background(Theme.surface)
         .onAppear { nameFocused = true; baseSource = model.state.preferences.baseSource }
+        .onDisappear { carrySizers.values.forEach { $0.task.cancel() }; carrySizers = [:] }
         .onChange(of: chosen) { _, _ in error = nil }
     }
 
@@ -227,7 +235,7 @@ struct ComposerView: View {
                     }
                     .task(id: HintKey(repos: chosenRepos.map(\.id), bases: chosenRepos.map(base(for:)))) { await refreshOriginHints() }
                 }
-                if chosenRepos.contains(where: { !(carryCandidates[$0.id] ?? []).isEmpty }) { carryOverSection }
+                if chosenRepos.contains(where: { !(carryTrees[$0.id]?.isEmpty ?? true) }) { carryOverSection }
             }
             .padding(.top, 8)
         } label: {
@@ -251,71 +259,143 @@ struct ComposerView: View {
                 Text("Ignored by git, so a new worktree doesn't have them. Ticked items are copied from each repo's original folder.")
                     .font(.system(size: 11)).foregroundStyle(Theme.muted)
             }
-            ForEach(chosenRepos.filter { !(carryCandidates[$0.id] ?? []).isEmpty }) { r in carryList(r) }
+            ForEach(chosenRepos.filter { !(carryTrees[$0.id]?.isEmpty ?? true) }) { r in carryList(r) }
             Toggle("Remember these choices for each repo", isOn: $rememberCarry)
                 .toggleStyle(.checkbox).font(.system(size: 12))
                 .accessibilityIdentifier("remember-carry-over")
         }
     }
 
+    static let carryRowHeight: CGFloat = 26
+    static let carryListMaxHeight: CGFloat = 240
+    /// More top-level entries than this get a filter field.
+    static let carryFilterThreshold = 15
+
     private func carryList(_ r: Repo) -> some View {
-        let all = carryCandidates[r.id] ?? []
+        let tree = carryTrees[r.id] ?? CarryTree()
         let picked = carryPicked[r.id] ?? []
-        let expanded = carryExpanded.contains(r.id)
-        let shown = all.filter { !$0.heavy || expanded || picked.contains($0.path) }
-        let hidden = all.count - shown.count
+        let open = carryRepoOpen.contains(r.id)
+        let rows = open ? tree.visibleRows(open: carryOpen[r.id] ?? [], filter: carryFilter[r.id] ?? "") : []
         return VStack(alignment: .leading, spacing: 0) {
-            Text(r.name).font(.system(size: 12.5, weight: .medium)).padding(.horizontal, 10).padding(.vertical, 6)
-            ForEach(shown) { c in
-                Divider()
-                carryRow(r, c, on: picked.contains(c.path))
+            Button {
+                if open { carryRepoOpen.remove(r.id) } else { carryRepoOpen.insert(r.id) }
+            } label: {
+                HStack(spacing: 6) {
+                    chevron(open)
+                    Text(r.name).font(.system(size: 12.5, weight: .medium))
+                    Text(carrySummary(tree, picked)).font(.system(size: 11)).foregroundStyle(Theme.muted)
+                    Spacer()
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .contentShape(Rectangle())
             }
-            if hidden > 0 {
+            .buttonStyle(.plain)
+            .accessibilityLabel("Local files in \(r.name)")
+            .accessibilityValue(carrySummary(tree, picked))
+            .accessibilityHint(open ? "Hides the list" : "Shows the list")
+            if open {
+                if tree.topLevelCount > Self.carryFilterThreshold {
+                    Divider()
+                    TextField("Filter paths", text: Binding(get: { carryFilter[r.id] ?? "" }, set: { carryFilter[r.id] = $0 }))
+                        .textFieldStyle(.roundedBorder).font(.system(size: 11.5))
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .accessibilityLabel("Filter local files in \(r.name)")
+                }
                 Divider()
-                Button("Show \(hidden) more (build output)") { carryExpanded.insert(r.id) }
-                    .buttonStyle(.plain).font(.system(size: 11.5)).foregroundStyle(Theme.chipFG)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
+                if rows.isEmpty {
+                    Text("No matches").font(.system(size: 11.5)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                } else {
+                    // Lazy and height-capped: only the rows in view are built, however long the list.
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(rows) { row in carryRow(r, tree, row, picked, first: row.id == rows.first?.id) }
+                        }
+                    }
+                    .frame(height: min(CGFloat(rows.count) * Self.carryRowHeight, Self.carryListMaxHeight))
+                }
             }
         }
         .frame(maxWidth: 560, alignment: .leading)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
     }
 
-    private func carryRow(_ r: Repo, _ c: CarryOver.Candidate, on: Bool) -> some View {
-        Button {
-            var set = carryPicked[r.id] ?? []
-            if on { set.remove(c.path) } else { set.insert(c.path) }
-            carryPicked[r.id] = set
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: on ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(on ? Theme.accent : Theme.muted).font(.system(size: 13))
-                Text(c.path).font(Theme.mono(11.5)).lineLimit(1).truncationMode(.middle)
-                if let tag = carryTag(c) {
-                    Text(tag).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(c.heavy && c.source == .detected ? Theme.amber : Theme.muted)
-                }
-                Spacer(minLength: 8)
-                Text(Self.sizeText(c)).font(.system(size: 11)).foregroundStyle(Theme.muted).monospacedDigit()
-            }
-            .padding(.horizontal, 10).padding(.vertical, 5)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(c.path) in \(r.name)")
-        .accessibilityAddTraits(on ? .isSelected : [])
+    private func chevron(_ open: Bool) -> some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.muted)
+            .rotationEffect(.degrees(open ? 90 : 0))
+            .frame(width: 12)
     }
 
-    private func carryTag(_ c: CarryOver.Candidate) -> String? {
-        switch c.source {
+    private func carryRow(_ r: Repo, _ tree: CarryTree, _ row: CarryTree.Row, _ picked: Set<String>, first: Bool) -> some View {
+        HStack(spacing: 4) {
+            Color.clear.frame(width: CGFloat(row.depth) * 16, height: 1)
+            if let n = row.node {
+                if n.isDir {
+                    Button { toggleCarryFolder(r, n.path) } label: { chevron(row.isOpen).frame(width: 16, height: 20).contentShape(Rectangle()) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel((row.isOpen ? "Collapse " : "Expand ") + n.path)
+                } else {
+                    Color.clear.frame(width: 16, height: 1)
+                }
+                let state = tree.checkState(n.path, picked)
+                Button {
+                    carryPicked[r.id] = tree.toggle(n.path, picked)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: state == .on ? "checkmark.square.fill" : state == .mixed ? "minus.square.fill" : "square")
+                            .foregroundStyle(state == .off ? Theme.muted : Theme.accent).font(.system(size: 13))
+                        Text(row.name).font(Theme.mono(11.5)).lineLimit(1).truncationMode(.middle)
+                        if let tag = carryTag(n, parent: row.parent) {
+                            Text(tag).font(.system(size: 10.5, weight: .semibold))
+                                .foregroundStyle(n.heavy && n.source == .detected ? Theme.amber : Theme.muted)
+                        }
+                        Spacer(minLength: 8)
+                        if let size = tree.size(of: n.path) {
+                            Text(Self.sizeText(size.0, capped: size.capped)).font(.system(size: 11)).foregroundStyle(Theme.muted).monospacedDigit()
+                        } else {
+                            ProgressView().controlSize(.mini)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(n.path) in \(r.name)")
+                .accessibilityValue(state == .on ? "selected" : state == .mixed ? "partly selected" : "not selected")
+                .accessibilityAddTraits(state == .on ? .isSelected : [])
+            } else if let note = row.note {
+                Color.clear.frame(width: 16, height: 1)
+                switch note {
+                case .loading: ProgressView().controlSize(.mini)
+                case .unreadable: Text("Can't read this folder").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                case .empty: Text("Empty folder").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                }
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 6)
+        .frame(height: Self.carryRowHeight)
+        .overlay(alignment: .top) { if !first { Rectangle().fill(Theme.border).frame(height: 1) } }
+    }
+
+    /// Why a row is offered. "build output" only on the outermost build folder, not on everything inside it.
+    private func carryTag(_ n: CarryTree.Node, parent: String) -> String? {
+        switch n.source {
         case .remembered: return "remembered"
         case .worktreeinclude: return CarryOver.includeFile
-        case .detected: return c.heavy ? "build output" : nil
+        case .detected: return n.heavy && n.kind != .group && !CarryOver.isHeavy(parent) ? "build output" : nil
         }
     }
 
-    static func sizeText(_ c: CarryOver.Candidate) -> String {
-        let s = ByteCountFormatter.string(fromByteCount: c.size, countStyle: .file)
-        return c.sizeCapped ? s + "+" : s
+    private func carrySummary(_ tree: CarryTree, _ picked: Set<String>) -> String {
+        guard !picked.isEmpty else { return "none selected" }
+        let size = tree.pickedSize(picked).map { " · " + Self.sizeText($0.0, capped: $0.capped) } ?? ""
+        return "\(picked.count) selected" + size
+    }
+
+    static func sizeText(_ size: Int64, capped: Bool) -> String {
+        let s = ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+        return capped ? s + "+" : s
     }
 
     /// Ticked carry-over paths across the chosen repos.
@@ -436,16 +516,96 @@ struct ComposerView: View {
         if !Task.isCancelled { originHints = result }
     }
 
-    /// Loads the carry-over list of each chosen repo not loaded yet, one repo at a time so lists appear as they're ready.
-    func refreshCarryCandidates() async {
+    struct CarrySizer { let id: UUID; let task: Task<Void, Never> }
+
+    /// Shows the carry-over tree of each chosen repo: the cached one at once when `AppModel` has it, reloaded in the
+    /// background when stale. Then loads open folders and starts sizing folders. Scans for deselected repos stop.
+    @MainActor func refreshCarryCandidates() async {
         try? await Task.sleep(nanoseconds: 250_000_000)   // debounce clicking through repos
-        for r in chosenRepos.filter(usable) where carryCandidates[r.id] == nil {
+        if Task.isCancelled { return }
+        let ids = Set(chosenRepos.map(\.id))
+        for (id, sizer) in carrySizers where !ids.contains(id) { sizer.task.cancel(); carrySizers[id] = nil }
+        for r in chosenRepos.filter(usable) {
             if Task.isCancelled { return }
-            let list = await model.carryOverCandidates(r)
+            if carryTrees[r.id] == nil, let cached = model.cachedCarryTree(r) {
+                setCarryTree(r, cached.tree)
+                if cached.fresh { startCarryWork(r); continue }
+            } else if carryTrees[r.id] != nil {
+                startCarryWork(r); continue
+            }
+            let tree = await model.loadCarryTree(r, keepingSizesFrom: carryTrees[r.id])
             if Task.isCancelled { return }
-            carryCandidates[r.id] = list
-            if carryPicked[r.id] == nil { carryPicked[r.id] = Set(list.filter(\.preselected).map(\.path)) }
+            setCarryTree(r, tree)
+            startCarryWork(r)
         }
+    }
+
+    @MainActor private func setCarryTree(_ r: Repo, _ tree: CarryTree) {
+        let first = carryPicked[r.id] == nil
+        carryTrees[r.id] = tree
+        guard first else { return }
+        carryPicked[r.id] = tree.preselected
+        carryOpen[r.id] = tree.initialOpen
+        if !tree.preselected.isEmpty { carryRepoOpen.insert(r.id) }
+    }
+
+    @MainActor private func updateCarryTree(_ r: Repo, _ change: (inout CarryTree) -> Void) {
+        guard var tree = carryTrees[r.id] else { return }
+        change(&tree)
+        carryTrees[r.id] = tree
+        model.updateCarryCache(r.id, tree)
+    }
+
+    @MainActor private func startCarryWork(_ r: Repo) {
+        loadOpenCarryFolders(r)
+        startCarrySizer(r)
+    }
+
+    @MainActor private func toggleCarryFolder(_ r: Repo, _ path: String) {
+        var open = carryOpen[r.id] ?? []
+        if open.remove(path) == nil { open.insert(path) }
+        carryOpen[r.id] = open
+        loadOpenCarryFolders(r)
+    }
+
+    /// Lists each open folder not loaded yet, one level at a time; opening a folder inside one loads it next.
+    @MainActor private func loadOpenCarryFolders(_ r: Repo) {
+        guard let tree = carryTrees[r.id] else { return }
+        for path in tree.unloaded(in: carryOpen[r.id] ?? []) {
+            let key = r.id.uuidString + "/" + path
+            guard !carryLoading.contains(key) else { continue }
+            carryLoading.insert(key)
+            Task { @MainActor in
+                let entries = await model.carryChildren(r, path)
+                carryLoading.remove(key)
+                updateCarryTree(r) { $0.setChildren(of: path, entries) }
+                startCarryWork(r)
+            }
+        }
+    }
+
+    /// Sizes the repo's unsized folders, four at a time, picking up folders loaded meanwhile. Build output goes last
+    /// with a lower file cap. Each result is shown as it arrives; cancelling stops the walks in progress.
+    @MainActor private func startCarrySizer(_ r: Repo) {
+        guard carrySizers[r.id] == nil, carryTrees[r.id]?.nextUnsized(excluding: []) != nil else { return }
+        let id = UUID(), root = r.path
+        let task = Task { @MainActor in
+            await withTaskGroup(of: (String, (Int64, capped: Bool)?).self) { g in
+                var busy: Set<String> = []
+                while true {
+                    while busy.count < 4, !Task.isCancelled, let job = carryTrees[r.id]?.nextUnsized(excluding: busy) {
+                        busy.insert(job.path)
+                        let cap = job.heavy ? CarryOver.heavyFileCap : CarryOver.fileCap
+                        g.addTask { (job.path, try? CarryOver.size(of: root + "/" + job.path, fileCap: cap)) }
+                    }
+                    guard let (path, size) = await g.next() else { break }
+                    busy.remove(path)
+                    if let size, !Task.isCancelled { updateCarryTree(r) { $0.setSize(path, size.0, capped: size.capped) } }
+                }
+            }
+            if carrySizers[r.id]?.id == id { carrySizers[r.id] = nil }
+        }
+        carrySizers[r.id] = CarrySizer(id: id, task: task)
     }
 
     func refreshBranchStates() async {
