@@ -1,0 +1,27 @@
+Locker/App/AppModel.swift
+  s_2bfa8544269134::t_9f9b556818de40 52-53,497,499-504,508
+Locker/Models/ClaudeActivity.swift
+  s_2bfa8544269134::t_8a3f94eb098ae9 22-37,39-47,59-87
+Locker/Terminal/TerminalHost.swift
+  s_2bfa8544269134::t_03ba4217ef2742 10-11,39-41,44
+LockerTests/ClaudeScreens.swift
+  s_2bfa8544269134::t_408857fe3b490b 1-102
+LockerTests/RedesignLogicTests.swift
+  s_2bfa8544269134::t_e38a0a006924b0 69-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6cfdd75daae1f9bfdbc391e1e9c068e978623d43",
+  "prompts": {},
+  "sessions": {
+    "s_2bfa8544269134": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "259be981-1347-45fb-b601-a0de16d0eece",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
