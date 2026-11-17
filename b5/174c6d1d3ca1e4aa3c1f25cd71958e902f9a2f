@@ -1,0 +1,35 @@
+Locker/App/AppModel.swift
+  s_2bfa8544269134::t_62468f48f01e10 50,56,58,64-66,402,498-547,559-565
+Locker/Models/ActivityHooks.swift
+  s_2bfa8544269134::t_35ce1a55842a62 1-75
+Locker/Models/ClaudeActivity.swift
+  s_2bfa8544269134::t_eebf75af40bae4 43-55
+Locker/Models/Models.swift
+  s_2bfa8544269134::t_ead492630e1a0c 31-32,34-35,44
+Locker/Services/ActivityHookStore.swift
+  s_2bfa8544269134::t_dcb710b3085ced 1-81
+Locker/Terminal/TerminalHost.swift
+  s_2bfa8544269134::t_240b421b37ac1c 8,27,31,61-62,71
+Locker/Views/SettingsView.swift
+  s_2bfa8544269134::t_e43737d3c93c16 195-196,218-229
+LockerTests/ActivityHooksTests.swift
+  s_2bfa8544269134::t_0b1accd3e140c1 1-96
+README.md
+  s_2bfa8544269134::t_8bc32789761905 20-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b5174c6d1d3ca1e4aa3c1f25cd71958e902f9a2f",
+  "prompts": {},
+  "sessions": {
+    "s_2bfa8544269134": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "259be981-1347-45fb-b601-a0de16d0eece",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
