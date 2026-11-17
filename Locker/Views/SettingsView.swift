@@ -192,6 +192,8 @@ private struct ProjectPage: View {
                 }
                 Text("Links a folder on your Mac. Nothing is copied.").font(.system(size: 11.5)).foregroundStyle(Theme.muted)
 
+                exactHighlightCard
+
                 if repos.isEmpty {
                     emptyRepos
                 } else {
@@ -211,6 +213,18 @@ private struct ProjectPage: View {
             .onTapGesture { resignNameFocus() }   // clicking empty space ends editing (and saves)
         }
         .onDisappear { if name != project.name { commitName() } }
+    }
+
+    private var exactHighlightCard: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: Binding(get: { project.exactHighlight }, set: { model.setExactHighlight($0, for: project.id) })) {
+                Text("Exact highlighting").font(.system(size: 13, weight: .semibold))
+            }
+            Text("Adds Claude Code hooks to this project's workspaces (in .claude/settings.local.json) so the sidebar knows exactly when Claude needs you. Other settings in that file are kept. Applies to Claude sessions started after switching it on.")
+                .font(.system(size: 11.5)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Theme.line))
     }
 
     private var emptyRepos: some View {

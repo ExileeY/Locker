@@ -40,6 +40,19 @@ enum ClaudeActivity: Int, Comparable {
         return .unknown
     }
 
+    /// Merges the screen with the latest hook signal (nil without hooks). The screen's positive "busy" always wins,
+    /// because between subagent reports the main agent's `Stop` fires while subagents still run. Otherwise a
+    /// `stop`/`prompt` signal means the user is needed now. A `busy` signal only fills in for an unreadable screen:
+    /// it is never sent when the user interrupts, so it must not outvote an idle input box.
+    static func combine(screen: Reading, hook: ActivityHooks.Signal?) -> Reading {
+        if screen == .busy { return .busy }
+        switch hook {
+        case .stop, .prompt: return .prompt
+        case .busy: return screen == .unknown ? .busy : screen
+        case nil: return screen
+        }
+    }
+
     /// Subagents still running: the agent panel under the input box (a `⏺ main` row followed by `◯ <agent>` rows).
     /// The "Waiting for N background agents" status line is not used: it stays in the scrollback after they finish.
     private static func showsSubagents(lines: [String]) -> Bool {

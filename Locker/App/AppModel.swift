@@ -47,18 +47,23 @@ final class AppModel: ObservableObject {
     let store: Store
     let service: WorkspaceService
     let sessions = SessionRegistry()
+    let hookStore: ActivityHookStore
     private var timer: Timer?
     private var activityTimer: Timer?
     /// Per-terminal memory behind the workspace highlight (see `ActivityTracker`).
     private var activityTrackers: [UUID: ActivityTracker] = [:]
 
-    init(store: Store = Store(), service: WorkspaceService = WorkspaceService()) {
+    init(store: Store = Store(), service: WorkspaceService = WorkspaceService(), hookStore: ActivityHookStore = ActivityHookStore()) {
         self.store = store
+        self.hookStore = hookStore
         self.service = service
         self.state = store.load()
         self.selectedID = state.workspaces.first?.id
         gitMissing = !service.git.isInstalled
         sessions.onExit = { [weak self] id in self?.closeTerminal(id) }
+        sessions.extraEnvironment = { [hookStore] id in hookStore.environment(for: id) }
+        try? hookStore.prepare()
+        syncAllHooks()
         select(selectedID)
         refreshRepoInfo()
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
@@ -394,6 +399,7 @@ final class AppModel: ObservableObject {
             }
             save()
             if !warnings.isEmpty { creationWarnings[ws.id] = warnings }
+            syncHooks(for: ws)
             select(ws.id)
             return nil
         case .failure(let e):
@@ -489,6 +495,56 @@ final class AppModel: ObservableObject {
         select(ws.id)
     }
 
+    // MARK: Claude Code hooks (exact highlighting)
+
+    /// A workspace gets hooks when any of its repos belongs to a project with "Exact highlighting" on.
+    func hooksEnabled(for ws: Workspace) -> Bool {
+        let repoIDs = Set(ws.repos.map(\.repoID))
+        return state.projects.contains { $0.exactHighlight && !repoIDs.isDisjoint(with: $0.repoIDs) }
+    }
+
+    /// Folders a Claude session in this workspace can start in: the workspace root and each repo's worktree.
+    private func hookFolders(_ ws: Workspace) -> [String] {
+        ([ws.root] + ws.repos.map(\.worktreePath)).filter { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    /// Makes the workspace's settings files match its project switches. Returns problems worth telling the user.
+    @discardableResult
+    func syncHooks(for ws: Workspace) -> [String] {
+        let on = hooksEnabled(for: ws), store = hookStore
+        var problems: [String] = []
+        for dir in hookFolders(ws) {
+            do {
+                if on {
+                    try store.install(in: dir)
+                    if dir != ws.root, !store.settingsIsIgnored(in: dir) {
+                        problems.append("\((dir as NSString).lastPathComponent): .claude/settings.local.json is not git-ignored")
+                    }
+                } else if store.isInstalled(in: dir) {
+                    try store.uninstall(from: dir)
+                }
+            } catch { problems.append("\((dir as NSString).lastPathComponent): \(error.localizedDescription)") }
+        }
+        return problems
+    }
+
+    /// Re-applies every workspace on launch, which also repairs a deleted or edited settings file.
+    private func syncAllHooks() {
+        for ws in state.workspaces { syncHooks(for: ws) }
+    }
+
+    func setExactHighlight(_ on: Bool, for projectID: UUID) {
+        guard let i = state.projects.firstIndex(where: { $0.id == projectID }) else { return }
+        state.projects[i].exactHighlight = on
+        save()
+        let problems = state.workspaces.flatMap { syncHooks(for: $0) }
+        if let first = problems.first {
+            showToast("Exact highlighting: \(first)" + (problems.count > 1 ? " (+\(problems.count - 1) more)" : ""), kind: .error)
+        } else {
+            showToast(on ? "Exact highlighting on. Restart Claude in open terminals to apply." : "Exact highlighting off")
+        }
+    }
+
     // MARK: Claude Code activity
 
     /// Checks every live terminal: is Claude Code its foreground job, and is it working or waiting for the user.
@@ -500,7 +556,13 @@ final class AppModel: ObservableObject {
             for t in ws.terminals {
                 guard let host = sessions.liveHost(t.id) else { continue }
                 live.insert(t.id)
-                states.append(activityTrackers[t.id, default: ActivityTracker()].update(host.claudeReading()))
+                var reading = host.claudeReading()
+                if let screen = reading {
+                    reading = ClaudeActivity.combine(screen: screen, hook: hookStore.signal(for: t.id))
+                } else if (activityTrackers[t.id]?.state ?? .none) != .none {
+                    hookStore.clear(t.id)   // Claude left the foreground: drop its last hook signal
+                }
+                states.append(activityTrackers[t.id, default: ActivityTracker()].update(reading))
             }
             let a = ClaudeActivity.combined(states)
             if a != .none { out[ws.id] = a }
