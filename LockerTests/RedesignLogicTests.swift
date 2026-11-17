@@ -66,11 +66,49 @@ final class ComposerOpsTests: XCTestCase {
 }
 
 final class ClaudeActivityTests: XCTestCase {
-    func testClassify() {
-        XCTAssertEqual(ClaudeActivity.classify(claudeInForeground: false, screen: ["esc to interrupt"]), .none)
-        XCTAssertEqual(ClaudeActivity.classify(claudeInForeground: true, screen: ["✻ Thinking… (12s · esc to interrupt)"]), .running)
-        XCTAssertEqual(ClaudeActivity.classify(claudeInForeground: true, screen: ["Do you want to proceed?", "❯ 1. Yes"]), .waiting)
-        XCTAssertEqual(ClaudeActivity.classify(claudeInForeground: true, screen: []), .waiting)
+    func testReadScreens() {
+        typealias R = ClaudeActivity.Reading
+        XCTAssertEqual(ClaudeActivity.read(screen: ["✻ Thinking… (12s · esc to interrupt)"]), R.busy)
+        XCTAssertEqual(ClaudeActivity.read(screen: ["Do you want to proceed?", "❯ 1. Yes"]), R.prompt)
+        // An empty or unrecognised screen is NOT "waiting".
+        XCTAssertEqual(ClaudeActivity.read(screen: []), R.unknown)
+        XCTAssertEqual(ClaudeActivity.read(screen: ClaudeScreens.idleStart), R.idle)
+        XCTAssertEqual(ClaudeActivity.read(screen: ClaudeScreens.busyWithHint), R.busy)
+        // Main agent waiting on subagents: no interrupt hint, but the subagent panel / status line is on screen.
+        XCTAssertEqual(ClaudeActivity.read(screen: ClaudeScreens.subagentsPanelNoHint), R.busy)
+        XCTAssertEqual(ClaudeActivity.read(screen: ClaudeScreens.subagentsDoneTurnPanelNoHint), R.busy)
+        XCTAssertEqual(ClaudeActivity.read(screen: ClaudeScreens.monitorOnlyPanel), R.busy)
+        XCTAssertEqual(ClaudeActivity.read(screen: ClaudeScreens.idleAfterSubagents), R.idle)
+    }
+
+    func testTrackerDebounce() {
+        var t = ActivityTracker()
+        XCTAssertEqual(t.update(nil), .none)
+        XCTAssertEqual(t.update(.idle), .waiting)            // first sighting shows at once
+        XCTAssertEqual(t.update(.busy), .running)
+        XCTAssertEqual(t.update(.unknown), .running)         // odd frame keeps the previous state
+        XCTAssertEqual(t.update(.idle), .running)            // 1/3
+        XCTAssertEqual(t.update(.idle), .running)            // 2/3
+        XCTAssertEqual(t.update(.busy), .running)            // counter resets
+        XCTAssertEqual(t.update(.idle), .running)
+        XCTAssertEqual(t.update(.idle), .running)
+        XCTAssertEqual(t.update(.idle), .waiting)            // 3rd consecutive idle sample
+        XCTAssertEqual(t.update(.unknown), .waiting)
+        XCTAssertEqual(t.update(.busy), .running)
+        XCTAssertEqual(t.update(.prompt), .waiting)          // permission menu shows immediately
+        XCTAssertEqual(t.update(nil), .none)                 // Claude left the foreground: memory reset
+        XCTAssertEqual(t.update(.busy), .running)
+    }
+
+    func testSubagentWaitStaysRunning() {
+        // Replays the captured two-subagent turn: it must never report "waiting" before the final input box.
+        var t = ActivityTracker()
+        _ = t.update(.busy)
+        for screen in [ClaudeScreens.subagentsPanelNoHint, ClaudeScreens.subagentsDoneTurnPanelNoHint, ClaudeScreens.monitorOnlyPanel] {
+            XCTAssertEqual(t.update(ClaudeActivity.read(screen: screen)), .running)
+        }
+        for _ in 0..<ActivityTracker.idleSamplesNeeded { _ = t.update(ClaudeActivity.read(screen: ClaudeScreens.idleAfterSubagents)) }
+        XCTAssertEqual(t.state, .waiting)
     }
 
     func testPriority() {

@@ -49,6 +49,8 @@ final class AppModel: ObservableObject {
     let sessions = SessionRegistry()
     private var timer: Timer?
     private var activityTimer: Timer?
+    /// Per-terminal memory behind the workspace highlight (see `ActivityTracker`).
+    private var activityTrackers: [UUID: ActivityTracker] = [:]
 
     init(store: Store = Store(), service: WorkspaceService = WorkspaceService()) {
         self.store = store
@@ -492,11 +494,18 @@ final class AppModel: ObservableObject {
     /// Checks every live terminal: is Claude Code its foreground job, and is it working or waiting for the user.
     func refreshActivity() {
         var out: [UUID: ClaudeActivity] = [:]
+        var live = Set<UUID>()
         for ws in state.workspaces {
-            let states = ws.terminals.compactMap { sessions.liveHost($0.id)?.claudeActivity() }
+            var states: [ClaudeActivity] = []
+            for t in ws.terminals {
+                guard let host = sessions.liveHost(t.id) else { continue }
+                live.insert(t.id)
+                states.append(activityTrackers[t.id, default: ActivityTracker()].update(host.claudeReading()))
+            }
             let a = ClaudeActivity.combined(states)
             if a != .none { out[ws.id] = a }
         }
+        activityTrackers = activityTrackers.filter { live.contains($0.key) }
         if out != activity { activity = out }
     }
 

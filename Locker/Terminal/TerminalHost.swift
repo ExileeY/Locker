@@ -7,8 +7,8 @@ protocol TerminalHost: AnyObject {
     var onExit: (() -> Void)? { get set }
     func start(cwd: String)
     func terminate()
-    /// Claude Code state of this terminal's foreground job.
-    func claudeActivity() -> ClaudeActivity
+    /// What the screen shows if Claude Code is this terminal's foreground job, else nil.
+    func claudeReading() -> ClaudeActivity.Reading?
 }
 
 final class SwiftTermHost: NSObject, TerminalHost, LocalProcessTerminalViewDelegate {
@@ -36,12 +36,12 @@ final class SwiftTermHost: NSObject, TerminalHost, LocalProcessTerminalViewDeleg
         term.terminate()
     }
 
-    func claudeActivity() -> ClaudeActivity {
-        guard let process = term.process, process.running else { return .none }
-        guard ProcessInspector.isClaudeInForeground(ptyFD: process.childfd) else { return .none }
+    func claudeReading() -> ClaudeActivity.Reading? {
+        guard let process = term.process, process.running else { return nil }
+        guard ProcessInspector.isClaudeInForeground(ptyFD: process.childfd) else { return nil }
         // Only the live screen: scrollback may hold a stale "esc to interrupt" line.
         let rows = term.terminalContentSnapshot(region: .history(maximumScrollbackRows: -1))?.rows.map(\.text) ?? []
-        return ClaudeActivity.classify(claudeInForeground: true, screen: rows)
+        return ClaudeActivity.read(screen: rows)
     }
 
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
