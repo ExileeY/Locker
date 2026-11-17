@@ -28,9 +28,11 @@ struct Project: Codable, Identifiable, Hashable {
     var id = UUID()
     var name: String
     var repoIDs: [UUID] = []
+    /// When on, workspaces containing one of this project's repos get Claude Code hooks for exact highlighting.
+    var exactHighlight = false
 
-    init(id: UUID = UUID(), name: String, repoIDs: [UUID] = []) {
-        self.id = id; self.name = name; self.repoIDs = repoIDs
+    init(id: UUID = UUID(), name: String, repoIDs: [UUID] = [], exactHighlight: Bool = false) {
+        self.id = id; self.name = name; self.repoIDs = repoIDs; self.exactHighlight = exactHighlight
     }
 
     /// Lenient: a malformed project must never make `Store.load()` fall back to an empty state.
@@ -39,6 +41,7 @@ struct Project: Codable, Identifiable, Hashable {
         id = (try? c.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
         name = (try? c.decodeIfPresent(String.self, forKey: .name)) ?? "Untitled project"
         repoIDs = (try? c.decodeIfPresent([UUID].self, forKey: .repoIDs)) ?? []
+        exactHighlight = (try? c.decodeIfPresent(Bool.self, forKey: .exactHighlight)) ?? false
     }
 
     /// Member repos that still exist, in the project's order, as `all` registers them.

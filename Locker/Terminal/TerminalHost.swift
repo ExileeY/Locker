@@ -5,10 +5,10 @@ import SwiftTerm
 protocol TerminalHost: AnyObject {
     var view: NSView { get }
     var onExit: (() -> Void)? { get set }
-    func start(cwd: String)
+    func start(cwd: String, environment extra: [String])
     func terminate()
-    /// Claude Code state of this terminal's foreground job.
-    func claudeActivity() -> ClaudeActivity
+    /// What the screen shows if Claude Code is this terminal's foreground job, else nil.
+    func claudeReading() -> ClaudeActivity.Reading?
 }
 
 final class SwiftTermHost: NSObject, TerminalHost, LocalProcessTerminalViewDelegate {
@@ -24,10 +24,11 @@ final class SwiftTermHost: NSObject, TerminalHost, LocalProcessTerminalViewDeleg
         term.font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
     }
 
-    func start(cwd: String) {
+    func start(cwd: String, environment extra: [String]) {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         var env = Terminal.getEnvironmentVariables(termName: "xterm-256color")
         env.append("COLORTERM=truecolor")
+        env.append(contentsOf: extra)
         term.startProcess(executable: shell, args: ["-l"], environment: env, execName: nil, currentDirectory: cwd)
     }
 
@@ -36,12 +37,12 @@ final class SwiftTermHost: NSObject, TerminalHost, LocalProcessTerminalViewDeleg
         term.terminate()
     }
 
-    func claudeActivity() -> ClaudeActivity {
-        guard let process = term.process, process.running else { return .none }
-        guard ProcessInspector.isClaudeInForeground(ptyFD: process.childfd) else { return .none }
+    func claudeReading() -> ClaudeActivity.Reading? {
+        guard let process = term.process, process.running else { return nil }
+        guard ProcessInspector.isClaudeInForeground(ptyFD: process.childfd) else { return nil }
         // Only the live screen: scrollback may hold a stale "esc to interrupt" line.
         let rows = term.terminalContentSnapshot(region: .history(maximumScrollbackRows: -1))?.rows.map(\.text) ?? []
-        return ClaudeActivity.classify(claudeInForeground: true, screen: rows)
+        return ClaudeActivity.read(screen: rows)
     }
 
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
@@ -57,6 +58,8 @@ final class SwiftTermHost: NSObject, TerminalHost, LocalProcessTerminalViewDeleg
 final class SessionRegistry {
     private var hosts: [UUID: TerminalHost] = [:]
     var onExit: ((UUID) -> Void)?
+    /// Extra environment for a new terminal's shell (the hook signal variables).
+    var extraEnvironment: (UUID) -> [String] = { _ in [] }
 
     func host(for spec: TerminalSpec) -> TerminalHost? {
         if let h = hosts[spec.id] { return h }
@@ -65,7 +68,7 @@ final class SessionRegistry {
         let id = spec.id
         h.onExit = { [weak self] in self?.onExit?(id) }
         hosts[spec.id] = h
-        h.start(cwd: spec.cwd)
+        h.start(cwd: spec.cwd, environment: extraEnvironment(spec.id))
         return h
     }
 
