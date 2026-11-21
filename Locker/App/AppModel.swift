@@ -44,6 +44,13 @@ final class AppModel: ObservableObject {
     var settingsSignpost: OSSignpostIntervalState?
     private var toastTask: Task<Void, Never>?
 
+    /// Side panel state per workspace id. Persisted separately in `panes.json`.
+    @Published private(set) var panes: [UUID: PaneState] = [:]
+    let paneStore: PaneStore
+    let browsers = BrowserRegistry()
+    /// Bumped to focus the address bar (⌘L); the panel watches it.
+    @Published private(set) var addressFocusTick = 0
+
     let store: Store
     let service: WorkspaceService
     let sessions = SessionRegistry()
@@ -53,8 +60,11 @@ final class AppModel: ObservableObject {
     /// Per-terminal memory behind the workspace highlight (see `ActivityTracker`).
     private var activityTrackers: [UUID: ActivityTracker] = [:]
 
-    init(store: Store = Store(), service: WorkspaceService = WorkspaceService(), hookStore: ActivityHookStore = ActivityHookStore()) {
+    init(store: Store = Store(), service: WorkspaceService = WorkspaceService(), hookStore: ActivityHookStore = ActivityHookStore(),
+         paneStore: PaneStore = PaneStore()) {
         self.store = store
+        self.paneStore = paneStore
+        self.panes = paneStore.load()
         self.hookStore = hookStore
         self.service = service
         self.state = store.load()
@@ -166,6 +176,43 @@ final class AppModel: ObservableObject {
             if w.activeTerminal == tid { w.activeTerminal = w.terminals.first?.id }
         }
         sessionsVersion += 1
+    }
+
+    // MARK: Side panel
+
+    func pane(of id: UUID) -> PaneState { panes[id] ?? PaneState() }
+
+    func updatePane(_ id: UUID, _ f: (inout PaneState) -> Void) {
+        var p = pane(of: id)
+        f(&p)
+        guard p != pane(of: id) else { return }
+        panes[id] = p
+        paneStore.save(panes)
+    }
+
+    /// The workspace's browser, created on first use and restored to its last page.
+    func browser(for id: UUID) -> BrowserModel {
+        browsers.model(for: id, initialURL: pane(of: id).url) { [weak self] url in
+            self?.updatePane(id) { $0.url = url }
+        }
+    }
+
+    /// ⌘L: show the panel if needed and focus its address bar.
+    func focusAddressBar() {
+        guard let id = selectedID, page == .workspace else { return }
+        updatePane(id) { $0.open = true }
+        addressFocusTick += 1
+    }
+
+    /// ⌘R: reload the open panel's page.
+    func reloadBrowser() {
+        guard let id = selectedID, pane(of: id).open else { return }
+        browser(for: id).reload()
+    }
+
+    func togglePane() {
+        guard let id = selectedID, page == .workspace else { return }
+        updatePane(id) { $0.open.toggle() }
     }
 
     // MARK: Repos
@@ -434,6 +481,8 @@ final class AppModel: ObservableObject {
         service.delete(ws, repos: state.repos)
         state.workspaces.removeAll { $0.id == ws.id }
         save()
+        browsers.close(ws.id)
+        if panes[ws.id] != nil { panes[ws.id] = nil; paneStore.save(panes) }
         if selectedID == ws.id { select(state.workspaces.first?.id) }
     }
 

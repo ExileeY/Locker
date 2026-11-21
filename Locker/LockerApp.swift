@@ -18,6 +18,16 @@ struct LockerApp: App {
                 Button("Settings…") { model.openSettings() }.keyboardShortcut(",")
             }
             CommandMenu("Workspace") {
+                Button("Toggle Browser Panel") { model.togglePane() }
+                    .keyboardShortcut("b", modifiers: [.command, .option])
+                    .disabled(model.selected == nil || model.page != .workspace)
+                Button("Open Address…") { model.focusAddressBar() }
+                    .keyboardShortcut("l")
+                    .disabled(model.selected == nil || model.page != .workspace)
+                Button("Reload Page") { model.reloadBrowser() }
+                    .keyboardShortcut("r")
+                    .disabled(model.selected == nil || model.page != .workspace || !(model.selected.map { model.pane(of: $0.id).open } ?? false))
+                Divider()
                 ForEach(0..<9, id: \.self) { i in
                     Button("Workspace \(i + 1)") { model.selectIndex(i) }
                         .keyboardShortcut(KeyEquivalent(Character(String(i + 1))), modifiers: .command)
