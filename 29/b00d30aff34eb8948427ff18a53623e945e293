@@ -1,0 +1,45 @@
+Locker/App/AppModel.swift
+  s_da9910e8c4ba4b::t_e46da7f4e2f474 47-53,63-64,66-67,181-217,484-485
+Locker/Browser/BrowserModel.swift
+  s_da9910e8c4ba4b::t_ee95c8cf04f222 1-173
+Locker/LockerApp.swift
+  s_da9910e8c4ba4b::t_49162dc96157f0 21-30
+Locker/Models/PaneState.swift
+  s_29ac729476588e::t_9e72154b8cf332 1-51
+Locker/Models/URLNormalizer.swift
+  s_da9910e8c4ba4b::t_848627ea8af547 1-75
+Locker/Services/PaneStore.swift
+  s_29ac729476588e::t_791d155f023a50 1-45
+Locker/Views/SidePane.swift
+  s_da9910e8c4ba4b::t_f445f3c65a26de 1-189
+Locker/Views/WorkspaceDetail.swift
+  s_29ac729476588e::t_2788405590c1f7 26,35
+LockerTests/PaneTests.swift
+  s_29ac729476588e::t_a29532246841f5 1-90
+LockerTests/URLNormalizerTests.swift
+  s_da9910e8c4ba4b::t_87e250aa8d9588 1-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "29b00d30aff34eb8948427ff18a53623e945e293",
+  "prompts": {},
+  "sessions": {
+    "s_29ac729476588e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7f207ec2-f492-493e-9fc4-8d12a458c331",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    },
+    "s_da9910e8c4ba4b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5398163d-e4de-4999-a01c-bf13ad852922",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
