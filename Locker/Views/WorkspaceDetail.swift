@@ -23,7 +23,7 @@ struct WorkspaceDetail: View {
                 .padding(.horizontal, 20).padding(.vertical, 8)
                 .accessibilityIdentifier("creation-warnings")
             }
-            TerminalArea(ws: ws)
+            SplitArea(ws: ws)
         }
     }
 
@@ -32,6 +32,7 @@ struct WorkspaceDetail: View {
             WorkspaceTitle(ws: ws)
             ForEach(ws.repos) { r in BranchChip(ws: ws, repo: r, status: model.statuses[r.id], missing: model.missing.contains(r.id)) }
             Spacer()
+            PaneToggle(ws: ws)
             Menu {
                 Button("Rename…") { model.renameRequest = ws.id }
                 Button("New terminal") { model.addTerminal() }
