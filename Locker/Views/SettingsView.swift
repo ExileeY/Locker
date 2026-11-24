@@ -93,6 +93,12 @@ private struct ProjectList: View {
                 }
             }
             Spacer(minLength: 0)
+            Toggle(isOn: Binding(get: { model.state.preferences.notifyOnNeedsInput }, set: { model.setNotifyOnNeedsInput($0) })) {
+                Text("Notify when Claude needs input").font(.system(size: 12, weight: .medium))
+            }
+            .toggleStyle(.switch).controlSize(.small)
+            .padding(.horizontal, 8).padding(.bottom, 12)
+            .help("Show a notification when a workspace's Claude session starts waiting for you")
         }
         .padding(.horizontal, 10).padding(.top, 14)
         .confirmationDialog("Delete “\(pendingDelete?.name ?? "")”?",
