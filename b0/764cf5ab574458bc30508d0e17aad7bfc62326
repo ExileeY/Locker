@@ -1,0 +1,31 @@
+Locker/App/AppModel.swift
+  s_5f10cba4fb3e86::t_600706e77c3de1 58,65-66,79-85,157,630-650
+Locker/Models/ActivityNotification.swift
+  s_5f10cba4fb3e86::t_1f63c1586d6458 1-31
+Locker/Models/Models.swift
+  s_5f10cba4fb3e86::t_fbd4d289a16952 127-128,135
+Locker/Services/NotificationService.swift
+  s_5f10cba4fb3e86::t_673394e98b599c 1-65
+Locker/Views/SettingsView.swift
+  s_5f10cba4fb3e86::t_49bdc7c34bbdff 96-101
+LockerTests/ActivityNotificationTests.swift
+  s_5f10cba4fb3e86::t_3910c29de43ab3 1-49
+README.md
+  s_5f10cba4fb3e86::t_a2ba2438b6d868 22-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b0764cf5ab574458bc30508d0e17aad7bfc62326",
+  "prompts": {},
+  "sessions": {
+    "s_5f10cba4fb3e86": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01da5070-b9f0-4bd3-af6d-9a824bb8ff60",
+        "model": "unknown"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
