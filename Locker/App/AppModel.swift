@@ -148,6 +148,22 @@ final class AppModel: ObservableObject {
         save()
     }
 
+    /// Moves a workspace to sit before `target` (nil = the end). Selection is by id, so it is unaffected.
+    func moveWorkspace(_ id: UUID, before target: UUID?) {
+        let moved = WorkspaceOrder.move(state.workspaces, id: id, before: target)
+        guard moved.map(\.id) != state.workspaces.map(\.id) else { return }
+        state.workspaces = moved
+        save()
+    }
+
+    /// Nudges a workspace one place up (-1) or down (+1).
+    func shiftWorkspace(_ id: UUID, by delta: Int) {
+        let moved = WorkspaceOrder.shift(state.workspaces, id: id, by: delta)
+        guard moved.map(\.id) != state.workspaces.map(\.id) else { return }
+        state.workspaces = moved
+        save()
+    }
+
     // MARK: Selection and sessions
 
     func select(_ id: UUID?) {

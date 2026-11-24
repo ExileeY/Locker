@@ -99,6 +99,8 @@ struct Footer: View {
 struct SidebarView: View {
     @EnvironmentObject var model: AppModel
     @State private var query = ""
+    @State private var rowTargeted: UUID?
+    @State private var endTargeted = false
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -118,7 +120,8 @@ struct SidebarView: View {
 
             ScrollView {
                 VStack(spacing: 4) {
-                    ForEach(shown) { w in row(w) }
+                    ForEach(shown) { w in row(w, canReorder: query.isEmpty, isFirst: w.id == all.first?.id, isLast: w.id == all.last?.id) }
+                    if query.isEmpty, all.count > 1 { endDropZone }
                     if shown.isEmpty, !query.isEmpty {
                         Text("No workspaces match “\(query)”.").font(.system(size: 12)).foregroundStyle(Theme.muted)
                             .frame(maxWidth: .infinity, alignment: .leading).padding(8)
@@ -157,16 +160,59 @@ struct SidebarView: View {
         .help("Search by name, branch or repository (⌘F)")
     }
 
-    private func row(_ w: Workspace) -> some View {
+    /// A strip under the last row so a workspace can be dropped at the very end.
+    private var endDropZone: some View {
+        Color.clear.frame(height: 28)
+            .overlay(alignment: .top) { if endTargeted { insertionLine } }
+            .contentShape(Rectangle())
+            .dropDestination(for: String.self) { items, _ in
+                guard let id = items.first.flatMap(UUID.init(uuidString:)) else { return false }
+                model.moveWorkspace(id, before: nil)
+                return true
+            } isTargeted: { endTargeted = $0 }
+    }
+
+    private var insertionLine: some View {
+        Capsule().fill(Theme.accent).frame(height: 3).padding(.horizontal, 4)
+    }
+
+    @ViewBuilder
+    private func row(_ w: Workspace, canReorder: Bool, isFirst: Bool, isLast: Bool) -> some View {
         let selected = w.id == model.selectedID && model.page == .workspace
         let a = model.activity(of: w)
-        return Button { model.select(w.id) } label: {
+        let button = Button { model.select(w.id) } label: {
             SidebarRow(ws: w, selected: selected, activity: a)
         }
         .buttonStyle(.plain)
+        .overlay(alignment: .top) { if rowTargeted == w.id { insertionLine.offset(y: -3) } }
         .accessibilityLabel("\(w.name), \(a.label), \(w.repos.count) \(w.repos.count == 1 ? "repo" : "repos")")
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityAction(named: "Move up") { model.shiftWorkspace(w.id, by: -1) }
+        .accessibilityAction(named: "Move down") { model.shiftWorkspace(w.id, by: 1) }
+
+        Group {
+            if canReorder {
+                button
+                    .draggable(w.id.uuidString)
+                    .dropDestination(for: String.self) { items, _ in
+                        guard let id = items.first.flatMap(UUID.init(uuidString:)) else { return false }
+                        model.moveWorkspace(id, before: w.id)
+                        return true
+                    } isTargeted: { targeted in
+                        if targeted { rowTargeted = w.id } else if rowTargeted == w.id { rowTargeted = nil }
+                    }
+            } else {
+                button.help("Clear search to reorder")
+            }
+        }
         .contextMenu {
+            if canReorder, !(isFirst && isLast) {
+                Button("Move to top") { model.moveWorkspace(w.id, before: model.state.workspaces.first?.id) }
+                    .disabled(isFirst)
+                Button("Move up") { model.shiftWorkspace(w.id, by: -1) }.disabled(isFirst)
+                Button("Move down") { model.shiftWorkspace(w.id, by: 1) }.disabled(isLast)
+                Divider()
+            }
             Button("Rename…") { model.select(w.id); model.renameRequest = w.id }
             Divider()
             Button("Delete workspace…", role: .destructive) { model.requestDelete(w) }
