@@ -7,7 +7,7 @@ Per-task workspaces for multi-repo work on macOS. A workspace is a task: one git
     xcodebuild -scheme Locker -destination 'platform=macOS,arch=arm64' -skipPackagePluginValidation test
     open Locker.xcodeproj   # then Run (first build: trust the SwiftTerm build plugin)
 
-State lives in `~/Library/Application Support/Locker/state.json`.
+State lives in `~/Library/Application Support/Locker/state.json`. Drag workspaces in the sidebar (or use the right-click "Move up / down / to top") to reorder them; the order is saved in the same file, and ⌘1–⌘9 follow it. Reordering is off while a search filter is active.
 
 Repositories are never copied or cloned: a workspace adds a `git worktree` that shares the original repo's history and branches. Moving or deleting an original repo breaks its worktrees. 
 **Start from** (under Advanced) picks where repos start. **Origin** (the default) fetches each repo first and starts from `origin/<base>`. Fetching only updates remote-tracking refs, never your local branches. If a fetch fails, Locker uses the last fetched `origin/<base>` and warns, and it only refuses when that ref was never fetched. Repos without an `origin`, and bases that only exist locally, use the local branch. **Local** starts from the local branch as it is. Each base field shows how the local branch compares with the last fetch. New branches never track the base they were created from. The last choice is remembered.
