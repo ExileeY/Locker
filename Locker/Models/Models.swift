@@ -124,12 +124,15 @@ enum BaseSource: String, Codable, CaseIterable {
 /// User choices Locker remembers between sessions. Every field is optional on disk so older files still load.
 struct Preferences: Codable, Equatable {
     var baseSource: BaseSource = .origin
+    /// Post a notification when a workspace's Claude session starts waiting for the user.
+    var notifyOnNeedsInput = true
 
     init() {}
 
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         baseSource = (try? c.decodeIfPresent(BaseSource.self, forKey: .baseSource)) ?? .origin
+        notifyOnNeedsInput = (try? c.decodeIfPresent(Bool.self, forKey: .notifyOnNeedsInput)) ?? true
     }
 }
 

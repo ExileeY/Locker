@@ -55,13 +55,15 @@ final class AppModel: ObservableObject {
     let service: WorkspaceService
     let sessions = SessionRegistry()
     let hookStore: ActivityHookStore
+    let notifier: Notifying
     private var timer: Timer?
     private var activityTimer: Timer?
     /// Per-terminal memory behind the workspace highlight (see `ActivityTracker`).
     private var activityTrackers: [UUID: ActivityTracker] = [:]
 
     init(store: Store = Store(), service: WorkspaceService = WorkspaceService(), hookStore: ActivityHookStore = ActivityHookStore(),
-         paneStore: PaneStore = PaneStore()) {
+         paneStore: PaneStore = PaneStore(), notifier: Notifying? = nil) {
+        self.notifier = notifier ?? NotificationService()
         self.store = store
         self.paneStore = paneStore
         self.panes = paneStore.load()
@@ -74,6 +76,13 @@ final class AppModel: ObservableObject {
         sessions.extraEnvironment = { [hookStore] id in hookStore.environment(for: id) }
         try? hookStore.prepare()
         syncAllHooks()
+        self.notifier.onOpenWorkspace = { [weak self] id in
+            guard let self, self.state.workspaces.contains(where: { $0.id == id }) else { return }
+            self.select(id)
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        }
+        if state.preferences.notifyOnNeedsInput { self.notifier.requestAuthorization() }
         select(selectedID)
         refreshRepoInfo()
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
@@ -145,6 +154,7 @@ final class AppModel: ObservableObject {
         if id != nil { page = .workspace }
         selectedID = id
         guard let ws = selected else { return }
+        notifier.clear(workspaceID: ws.id)
         for t in ws.terminals { _ = sessions.host(for: t) }   // spawn so background processes run
         sessionsVersion += 1
         refresh()
@@ -617,7 +627,27 @@ final class AppModel: ObservableObject {
             if a != .none { out[ws.id] = a }
         }
         activityTrackers = activityTrackers.filter { live.contains($0.key) }
-        if out != activity { activity = out }
+        if out != activity {
+            notifyTransitions(from: activity, to: out)
+            activity = out
+        }
+    }
+
+    /// Announces workspaces that just started waiting for input, and removes banners that are no longer true.
+    private func notifyTransitions(from old: [UUID: ClaudeActivity], to new: [UUID: ClaudeActivity]) {
+        let visible: UUID? = page == .workspace ? selectedID : nil
+        let changes = ActivityNotification.changes(old: old, new: new, appActive: NSApp.isActive, visibleWorkspace: visible,
+                                                   enabled: state.preferences.notifyOnNeedsInput)
+        for id in changes.clear { notifier.clear(workspaceID: id) }
+        for id in changes.notify {
+            if let ws = state.workspaces.first(where: { $0.id == id }) { notifier.notifyNeedsInput(workspaceID: id, name: ws.name) }
+        }
+    }
+
+    func setNotifyOnNeedsInput(_ on: Bool) {
+        state.preferences.notifyOnNeedsInput = on
+        save()
+        if on { notifier.requestAuthorization() }
     }
 
     func activity(of ws: Workspace) -> ClaudeActivity { activity[ws.id] ?? .none }
