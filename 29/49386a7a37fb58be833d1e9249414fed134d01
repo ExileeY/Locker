@@ -1,0 +1,35 @@
+Locker/App/AppModel.swift
+  s_5f10cba4fb3e86::t_d0c8948ca86c19 142-157
+Locker/Models/WorkspaceOrder.swift
+  s_5f10cba4fb3e86::t_a6389d5e3ca2c8 1-26
+Locker/Views/ContentView.swift
+  s_5f10cba4fb3e86::t_bcad8614a648fa 102-103,123-124,163-180,183,187,190-207,209-215
+LockerTests/WorkspaceOrderTests.swift
+  s_649ba78067eff9::t_0104abd39a32f6 1-50
+README.md
+  s_5f10cba4fb3e86::t_04e3848964f1fb 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2949386a7a37fb58be833d1e9249414fed134d01",
+  "prompts": {},
+  "sessions": {
+    "s_5f10cba4fb3e86": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "01da5070-b9f0-4bd3-af6d-9a824bb8ff60",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    },
+    "s_649ba78067eff9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "83f3c81b-72a1-4d87-a009-94765a2805d7",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Danila Glazov <danikglazov@gmail.com>"
+    }
+  }
+}
